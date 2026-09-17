@@ -258,7 +258,7 @@ git commit -m "feat: execute and verify provider power operations"
 - Produces: authenticated `GET /events` using `text/event-stream`.
 - Produces: `events.Publisher.Publish(Event)` and bounded per-client subscriptions.
 
-- [ ] **Step 1: Write failing HTTP and broker tests**
+- [x] **Step 1: Write failing HTTP and broker tests**
 
 ```go
 func TestActionEndpointUsesIdempotencyKey(t *testing.T) {
@@ -273,19 +273,19 @@ func TestActionEndpointUsesIdempotencyKey(t *testing.T) {
 
 Cover invalid action, capability/state conflict (`409`), active operation (`409`), idempotent replay (`200`), not found (`404`), list/detail, and stable error codes. Broker tests prove ordered event delivery, slow subscribers being disconnected rather than blocking publishers, cancellation cleanup, SSE headers, event IDs, heartbeat comments, and JSON payloads without credentials.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run: `go test ./internal/operations ./internal/events -run 'HTTP|Broker' -v`
 
 Expected: FAIL because HTTP handlers and events package do not exist.
 
-- [ ] **Step 3: Implement API and SSE**
+- [x] **Step 3: Implement API and SSE**
 
 Use `Idempotency-Key` when present; otherwise generate a UUID in the service. Return `{ "operation": ... }` with `202` for new operations and `200` for replay. Expose newest-first operation history with optional `server_id`, `connection_id`, and `status` filters.
 
 The broker assigns monotonic in-process IDs and uses a fixed-size channel per subscriber. `GET /events` sends `retry: 3000`, typed `operation.updated`/`server.updated` events, and 15-second heartbeat comments. Never include provider payloads or secrets. Disconnect a subscriber whose channel is full.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./internal/operations ./internal/events -v`
 
