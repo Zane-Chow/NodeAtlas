@@ -37,11 +37,11 @@
 
 **Files:** new `internal/console` policy, service, memory target store and tests.
 
-- [ ] Test rejection of HTTP embedded targets, userinfo, fragments, loopback, link-local, multicast, unspecified, cloud metadata and unapproved private addresses.
-- [ ] Implement resolver-injected URL policy; allow `wss` for embedded and `https` for external pages.
-- [ ] Resolve options in embedded → new window → portal order from server capabilities.
-- [ ] Create hashed one-use tickets, keep temporary targets only in memory, and append sanitized audit entries.
-- [ ] Implement provider portal endpoint with the same URL policy.
+- [x] Test rejection of HTTP embedded targets, userinfo, fragments, loopback, link-local, multicast, unspecified, cloud metadata and unapproved private addresses.
+- [x] Implement resolver-injected URL policy; allow `wss` for embedded and `https` for external pages.
+- [x] Resolve options in embedded → new window → portal order from server capabilities.
+- [x] Create hashed one-use tickets, keep temporary targets only in memory, and append sanitized audit entries.
+- [x] Implement provider portal resolution with the same URL policy.
 
 ### Task 3: WebSocket Console Gateway
 
