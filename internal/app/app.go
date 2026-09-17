@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"controlpanel/internal/auth"
@@ -20,6 +21,7 @@ import (
 	providermock "controlpanel/internal/providers/mock"
 	"controlpanel/internal/secrets"
 	"controlpanel/internal/webassets"
+	"github.com/go-chi/chi/v5"
 )
 
 func Run(ctx context.Context, cfg config.Config) error {
@@ -93,8 +95,20 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	jobRepository := jobs.NewSQLRepository(db, dialect)
 	queue := jobs.NewQueue(jobRepository, jobs.QueueOptions{})
 	connectionService := connections.NewService(connectionRepository, credentialCipher, registry, queue, connections.ServiceOptions{})
-	featureHandler := connections.NewHTTPHandler(connectionService)
+	connectionHandler := connections.NewHTTPHandler(connectionService)
 	inventoryRepository := inventory.NewSQLRepository(db, dialect)
+	inventoryHandler := inventory.NewHTTPHandler(inventoryRepository, connectionService)
+	featureHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		requestPath := chi.RouteContext(request.Context()).RoutePath
+		switch {
+		case requestPath == "/provider-types", requestPath == "/connections", strings.HasPrefix(requestPath, "/connections/"):
+			connectionHandler.ServeHTTP(response, request)
+		case requestPath == "/servers", strings.HasPrefix(requestPath, "/servers/"):
+			inventoryHandler.ServeHTTP(response, request)
+		default:
+			http.NotFound(response, request)
+		}
+	})
 	syncer := inventory.NewSyncer(connectionRepository, inventoryRepository, credentialCipher, registry, inventory.SyncerOptions{})
 	worker := jobs.NewWorker(jobRepository, jobs.HandlerFunc(func(ctx context.Context, job jobs.Job) error {
 		if job.Kind != jobs.KindSyncConnection {

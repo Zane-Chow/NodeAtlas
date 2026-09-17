@@ -55,6 +55,14 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	handler.ServeHTTP(createResponse, create)
 	require.Equal(t, http.StatusCreated, createResponse.Code)
 	require.NotContains(t, createResponse.Body.String(), "write-only")
+	servers := httptest.NewRequest(http.MethodGet, "/api/v1/servers", nil)
+	for _, cookie := range setupResponse.Result().Cookies() {
+		servers.AddCookie(cookie)
+	}
+	serversResponse := httptest.NewRecorder()
+	handler.ServeHTTP(serversResponse, servers)
+	require.Equal(t, http.StatusOK, serversResponse.Code)
+	require.Contains(t, serversResponse.Body.String(), `"total":0`)
 
 	stored, err := connections.NewSQLRepository(db, dialect).List(context.Background())
 	require.NoError(t, err)
