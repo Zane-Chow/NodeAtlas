@@ -163,7 +163,13 @@ func (provider *Provider) OpenConsole(_ context.Context, ref providers.ServerRef
 	if !allowed {
 		return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorUnsupported, Message: "mock console mode unavailable"}
 	}
-	target, _ := url.Parse("https://mock.invalid/console/" + url.PathEscape(provider.connectionID) + "/" + url.PathEscape(server.ExternalID))
+	scheme := "https"
+	host := "mock.invalid"
+	if mode == providers.ConsoleEmbedded {
+		scheme = "mock+ws"
+		host = "console"
+	}
+	target, _ := url.Parse(scheme + "://" + host + "/console/" + url.PathEscape(provider.connectionID) + "/" + url.PathEscape(server.ExternalID))
 	return providers.ConsoleTarget{Mode: mode, URL: target}, nil
 }
 

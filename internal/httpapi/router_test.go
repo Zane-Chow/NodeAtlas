@@ -93,6 +93,21 @@ func TestAPIV1MountsAuthenticationHandler(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, response.Code)
 }
 
+func TestWebSocketMountDoesNotFallBackToFrontend(t *testing.T) {
+	websocketHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/ws/console/ticket-a", request.URL.Path)
+		response.WriteHeader(http.StatusUnauthorized)
+	})
+	router := NewRouter(Dependencies{
+		Assets:    fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("app")}},
+		WebSocket: websocketHandler,
+	})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ws/console/ticket-a", nil))
+	require.Equal(t, http.StatusUnauthorized, response.Code)
+}
+
 func TestEmbeddedAssetsContainProductionIndex(t *testing.T) {
 	index, err := fs.ReadFile(webassets.FileSystem(), "index.html")
 	require.NoError(t, err)

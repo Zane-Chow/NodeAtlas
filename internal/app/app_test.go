@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"controlpanel/internal/config"
@@ -14,6 +15,7 @@ import (
 	"controlpanel/internal/database"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/operations"
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -137,9 +139,41 @@ func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
 	handler.ServeHTTP(serverResponse, appRequest(http.MethodGet, "/api/v1/servers/"+serversPayload.Servers[0].ID, "", cookies))
 	require.Contains(t, serverResponse.Body.String(), `"state":"running"`)
 
+	consoleOptions := httptest.NewRecorder()
+	handler.ServeHTTP(consoleOptions, appRequest(http.MethodGet, "/api/v1/servers/"+serversPayload.Servers[0].ID+"/console-options", "", cookies))
+	require.Equal(t, http.StatusOK, consoleOptions.Code)
+	require.Contains(t, consoleOptions.Body.String(), `"embedded":{"available":true}`)
+	consoleSession := httptest.NewRecorder()
+	handler.ServeHTTP(consoleSession, appRequest(http.MethodPost, "/api/v1/servers/"+serversPayload.Servers[0].ID+"/console-sessions", "{}", cookies))
+	require.Equal(t, http.StatusCreated, consoleSession.Code)
+	require.NotContains(t, consoleSession.Body.String(), "mock+ws")
+	var consolePayload struct {
+		Session struct {
+			Ticket string `json:"ticket"`
+		} `json:"session"`
+	}
+	require.NoError(t, json.Unmarshal(consoleSession.Body.Bytes(), &consolePayload))
+	testServer := httptest.NewServer(handler)
+	t.Cleanup(testServer.Close)
+	cookieValues := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		cookieValues = append(cookieValues, cookie.Name+"="+cookie.Value)
+	}
+	consoleConnection, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(testServer.URL, "http")+"/ws/console/"+consolePayload.Session.Ticket, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Cookie": []string{strings.Join(cookieValues, "; ")}},
+	})
+	require.NoError(t, err)
+	_, banner, err := consoleConnection.Read(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, string(banner), "Mock Console")
+	require.NoError(t, consoleConnection.Close(websocket.StatusNormalClosure, "done"))
+
 	unauthenticatedEvents := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticatedEvents, httptest.NewRequest(http.MethodGet, "/api/v1/events", nil))
 	require.Equal(t, http.StatusUnauthorized, unauthenticatedEvents.Code)
+	unauthenticatedConsole := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticatedConsole, httptest.NewRequest(http.MethodGet, "/ws/console/unknown", nil))
+	require.Equal(t, http.StatusUnauthorized, unauthenticatedConsole.Code)
 }
 
 func appRequest(method, path, body string, cookies []*http.Cookie) *http.Request {

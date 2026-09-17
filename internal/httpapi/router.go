@@ -15,6 +15,7 @@ type Dependencies struct {
 	Assets    fs.FS
 	Readiness Readiness
 	Auth      http.Handler
+	WebSocket http.Handler
 }
 
 type Readiness interface {
@@ -38,6 +39,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 	if deps.Auth != nil {
 		router.Mount("/api/v1", deps.Auth)
+	}
+	if deps.WebSocket != nil {
+		router.Mount("/ws", deps.WebSocket)
 	}
 	router.Handle("/*", frontendHandler(deps.Assets))
 	return router

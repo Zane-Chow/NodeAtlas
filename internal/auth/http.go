@@ -30,6 +30,7 @@ type HTTPOptions struct {
 type HTTPHandler struct {
 	service *Service
 	options HTTPOptions
+	router  http.Handler
 }
 
 type authContextKey struct{}
@@ -39,7 +40,7 @@ type requestAuth struct {
 	RawToken string
 }
 
-func NewHTTPHandler(service *Service, options HTTPOptions) http.Handler {
+func NewHTTPHandler(service *Service, options HTTPOptions) *HTTPHandler {
 	handler := &HTTPHandler{service: service, options: options}
 	router := chi.NewRouter()
 	router.Get("/setup/status", handler.setupStatus)
@@ -54,7 +55,16 @@ func NewHTTPHandler(service *Service, options HTTPOptions) http.Handler {
 			protected.Mount("/", handler.requireMutationSecurity(options.Protected))
 		}
 	})
-	return router
+	handler.router = router
+	return handler
+}
+
+func (handler *HTTPHandler) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	handler.router.ServeHTTP(response, request)
+}
+
+func (handler *HTTPHandler) ProtectSession(next http.Handler) http.Handler {
+	return handler.requireSession(next)
 }
 
 func (handler *HTTPHandler) requireMutationSecurity(next http.Handler) http.Handler {

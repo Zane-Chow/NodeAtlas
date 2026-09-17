@@ -14,6 +14,7 @@ import (
 	"controlpanel/internal/auth"
 	"controlpanel/internal/config"
 	"controlpanel/internal/connections"
+	consoleapi "controlpanel/internal/console"
 	"controlpanel/internal/database"
 	"controlpanel/internal/events"
 	"controlpanel/internal/httpapi"
@@ -107,6 +108,12 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	auditRepository := audit.NewSQLRepository(db, dialect)
 	operationService := operations.NewService(operationRepository, inventoryRepository, queue, auditRepository, operations.ServiceOptions{Publisher: eventBroker})
 	operationHandler := operations.NewHTTPHandler(operationService, operationRepository)
+	consoleRepository := consoleapi.NewSQLRepository(db, dialect)
+	consoleTargets := consoleapi.NewMemoryTargetStore()
+	consolePolicy := consoleapi.NewTargetPolicy(nil, consoleapi.TargetPolicyOptions{AllowMockTransport: true})
+	consoleService := consoleapi.NewService(consoleRepository, inventoryRepository, connectionRepository, auditRepository, credentialCipher, registry, consolePolicy, consoleTargets, consoleapi.ServiceOptions{})
+	consoleHandler := consoleapi.NewHTTPHandler(consoleService)
+	consoleGateway := consoleapi.NewWebSocketGateway(consoleRepository, consoleTargets, auditRepository, consoleapi.GatewayOptions{})
 	featureHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requestPath := chi.RouteContext(request.Context()).RoutePath
 		switch {
@@ -114,6 +121,8 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 			eventHandler.ServeHTTP(response, request)
 		case requestPath == "/operations", strings.HasPrefix(requestPath, "/operations/"), strings.Contains(requestPath, "/actions/"):
 			operationHandler.ServeHTTP(response, request)
+		case strings.Contains(requestPath, "/console-"), strings.Contains(requestPath, "/console-sessions"), strings.Contains(requestPath, "/provider-portal"):
+			consoleHandler.ServeHTTP(response, request)
 		case requestPath == "/provider-types", requestPath == "/connections", strings.HasPrefix(requestPath, "/connections/"):
 			connectionHandler.ServeHTTP(response, request)
 		case requestPath == "/servers", strings.HasPrefix(requestPath, "/servers/"):
@@ -153,6 +162,7 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 		Assets:    webassets.FileSystem(),
 		Readiness: db,
 		Auth:      authHandler,
+		WebSocket: authHandler.ProtectSession(consoleGateway),
 	})
 	return handler, worker, nil
 }

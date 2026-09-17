@@ -47,11 +47,11 @@
 
 **Files:** new `internal/console/websocket.go`, router/app composition, Mock provider and tests.
 
-- [ ] Add WebSocket handshake tests for missing, expired, reused and valid tickets.
-- [ ] Consume tickets atomically before opening the target.
-- [ ] Proxy binary/text frames bidirectionally for validated `wss` targets with idle and absolute deadlines.
-- [ ] Register an in-process Mock console transport that emits a banner and echoes input without network access.
-- [ ] Record opened/closed/result metadata only and clear in-memory target material.
+- [x] Add WebSocket handshake tests for missing, expired, reused and valid tickets.
+- [x] Consume tickets atomically before opening the target.
+- [x] Proxy binary/text frames bidirectionally for validated `wss` targets with idle and absolute deadlines.
+- [x] Register an in-process Mock console transport that emits a banner and echoes input without network access.
+- [x] Record opened/closed/result metadata only and clear in-memory target material.
 
 ### Task 4: Backup Envelope and Logical Snapshot
 
