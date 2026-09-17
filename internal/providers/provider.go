@@ -43,6 +43,14 @@ func (providerError *Error) Error() string {
 	return fmt.Sprintf("provider %s: %s", providerError.Code, providerError.Message)
 }
 
+func (providerError *Error) RetryableError() bool {
+	return providerError.Retryable
+}
+
+func (providerError *Error) SafeMessage() string {
+	return providerError.Message
+}
+
 type ConnectionConfig struct {
 	ID          string
 	Type        string
