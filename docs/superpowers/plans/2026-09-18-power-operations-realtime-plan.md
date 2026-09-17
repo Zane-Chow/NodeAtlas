@@ -366,7 +366,7 @@ git commit -m "feat: compose authenticated power operation workflow"
 - Consumes: power action, operation history, inventory, and SSE endpoints.
 - Produces: confirmed capability-aware power actions, operation history navigation, and realtime local-data refresh.
 
-- [ ] **Step 1: Write failing server action tests**
+- [x] **Step 1: Write failing server action tests**
 
 ```tsx
 it('confirms and queues a supported start action', async () => {
@@ -383,23 +383,23 @@ it('confirms and queues a supported start action', async () => {
 
 Cover unsupported/invalid-state disabled buttons with capability reasons, cancel, API conflict/error, optimistic busy state without optimistic final state, and successful refetch after an event.
 
-- [ ] **Step 2: Write failing history and SSE tests**
+- [x] **Step 2: Write failing history and SSE tests**
 
 Test operation status/action labels, newest-first rows, server filters, empty/error/loading states, navigation to `/operations`, EventSource lifecycle, reconnect behavior delegated to the browser, and refetch callbacks for `operation.updated` and `server.updated` only.
 
-- [ ] **Step 3: Run tests and verify red**
+- [x] **Step 3: Run tests and verify red**
 
 Run: `npm --prefix web test -- --run src/servers/ServersPage.test.tsx src/operations src/events src/app/App.test.tsx`
 
 Expected: FAIL because action/history/event components do not exist.
 
-- [ ] **Step 4: Implement typed client and UI**
+- [x] **Step 4: Implement typed client and UI**
 
 Add `requestPowerAction(serverID, action, idempotencyKey)`, `listOperations(filters)`, and `getOperation(id)`. Generate one idempotency key per confirmation submission with `crypto.randomUUID()`. Buttons derive state and explanations exclusively from returned capabilities. Keep final server state authoritative by refetching after the mutation and SSE invalidation.
 
 Enable the existing “操作记录” navigation item and route. Operation history shows action, target server, status, queue/start/finish times, and sanitized error text. `useServerEvents` creates one authenticated same-origin `EventSource('/api/v1/events')`, closes it on unmount, and exposes invalidation callbacks.
 
-- [ ] **Step 5: Verify production frontend and commit**
+- [x] **Step 5: Verify production frontend and commit**
 
 Run:
 

@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
 import type { AuthUser } from '../auth/useAuth'
 import { ConnectionsPage } from '../connections/ConnectionsPage'
+import { OperationsPage } from '../operations/OperationsPage'
 import { ServersPage } from '../servers/ServersPage'
 
-type Page = 'dashboard' | 'servers' | 'connections'
+type Page = 'dashboard' | 'servers' | 'connections' | 'operations'
 const navigation: Array<{ label: string; page?: Page; path?: string }> = [
   { label: '总览', page: 'dashboard', path: '/' },
   { label: '服务器', page: 'servers', path: '/servers' },
   { label: '服务商', page: 'connections', path: '/connections' },
-  { label: '操作记录' },
+  { label: '操作记录', page: 'operations', path: '/operations' },
   { label: '备份与设置' },
 ]
-const pageTitles: Record<Page, string> = { dashboard: '运行总览', servers: '统一服务器清单', connections: '服务商连接' }
+const pageTitles: Record<Page, string> = { dashboard: '运行总览', servers: '统一服务器清单', connections: '服务商连接', operations: '操作记录' }
 
 function pageFromPath(path: string): Page {
   if (path.startsWith('/servers')) return 'servers'
   if (path.startsWith('/connections')) return 'connections'
+  if (path.startsWith('/operations')) return 'operations'
   return 'dashboard'
 }
 
@@ -50,15 +52,16 @@ export function AppShell({ user, onLogout }: { user: AuthUser; onLogout(): Promi
       {page === 'dashboard' && <Dashboard />}
       {page === 'servers' && <ServersPage />}
       {page === 'connections' && <ConnectionsPage />}
+      {page === 'operations' && <OperationsPage />}
     </main>
   </div>
 }
 
 function Dashboard() {
   return <section className="content-grid">
-    <article className="welcome-card"><p className="eyebrow">里程碑 2 · 统一资源核心</p><h2>连接服务商，汇总所有服务器</h2><p>Mock Provider、加密凭据、持久同步任务与本地服务器索引已经接通。</p><div className="progress-track"><span style={{ width: '40%' }} /></div></article>
+    <article className="welcome-card"><p className="eyebrow">里程碑 3 · 安全电源控制</p><h2>统一控制服务器电源状态</h2><p>电源操作、幂等任务、状态验证、操作记录与实时更新已经接通。</p><div className="progress-track"><span style={{ width: '60%' }} /></div></article>
     <article className="status-card"><span className="status-icon">PV</span><div><small>Provider 核心</small><strong>Mock 已接入</strong><p>支持多个独立连接</p></div></article>
     <article className="status-card"><span className="status-icon">JOB</span><div><small>同步任务</small><strong>持久化运行</strong><p>租约、重试与错误分类</p></div></article>
-    <article className="next-card"><span className="step-number">03</span><div><small>下一里程碑</small><h3>开机、关机与重启</h3><p>服务器级互斥、状态验证、操作记录与实时更新。</p></div></article>
+    <article className="next-card"><span className="step-number">04</span><div><small>下一里程碑</small><h3>控制台与双数据库备份</h3><p>支持内嵌、新窗口与服务商后台回退的控制台入口。</p></div></article>
   </section>
 }
