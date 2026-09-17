@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -11,7 +12,12 @@ import (
 )
 
 type Dependencies struct {
-	Assets fs.FS
+	Assets    fs.FS
+	Readiness Readiness
+}
+
+type Readiness interface {
+	PingContext(context.Context) error
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -19,6 +25,15 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Get("/health/live", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(map[string]string{"status": "ok"})
+	})
+	router.Get("/health/ready", func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if deps.Readiness == nil || deps.Readiness.PingContext(request.Context()) != nil {
+			response.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(response).Encode(map[string]string{"status": "unavailable"})
+			return
+		}
+		_ = json.NewEncoder(response).Encode(map[string]string{"status": "ready"})
 	})
 	router.Handle("/*", frontendHandler(deps.Assets))
 	return router

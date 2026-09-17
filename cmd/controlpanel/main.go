@@ -10,14 +10,12 @@ import (
 	"syscall"
 
 	"controlpanel/internal/app"
-	"controlpanel/internal/httpapi"
-	"controlpanel/internal/webassets"
+	"controlpanel/internal/config"
 )
 
 var version = "dev"
 
 func main() {
-	address := flag.String("address", "127.0.0.1:8080", "HTTP listen address")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -29,8 +27,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	router := httpapi.NewRouter(httpapi.Dependencies{Assets: webassets.FileSystem()})
-	if err := app.Run(ctx, *address, router); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("invalid configuration: %v", err)
+		os.Exit(1)
+	}
+	if err := app.Run(ctx, cfg); err != nil {
 		log.Printf("server stopped: %v", err)
 		os.Exit(1)
 	}
