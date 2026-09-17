@@ -22,7 +22,7 @@ func TestSQLiteMigrationsAreIdempotent(t *testing.T) {
 	require.NoError(t, Migrate(context.Background(), db, dialect))
 	require.NoError(t, Migrate(context.Background(), db, dialect))
 
-	for _, table := range []string{"schema_migrations", "users", "sessions", "provider_connections", "servers", "jobs", "operations", "audit_logs"} {
+	for _, table := range []string{"schema_migrations", "users", "sessions", "provider_connections", "servers", "jobs", "operations", "audit_logs", "console_sessions", "backups", "settings"} {
 		var count int
 		err := db.QueryRow(
 			"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",

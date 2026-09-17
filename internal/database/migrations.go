@@ -263,4 +263,76 @@ var migrations = []migration{
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 		},
 	},
+	{
+		Version: 4,
+		SQLite: []string{
+			`CREATE TABLE console_sessions (
+				id TEXT PRIMARY KEY,
+				server_id TEXT NOT NULL,
+				mode TEXT NOT NULL CHECK (mode IN ('embedded')),
+				ticket_hash BLOB NOT NULL UNIQUE CHECK (length(ticket_hash) = 32),
+				expires_at TEXT NOT NULL,
+				opened_at TEXT,
+				closed_at TEXT,
+				result TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE RESTRICT
+			)`,
+			`CREATE INDEX console_sessions_expiry_idx ON console_sessions(expires_at, opened_at)`,
+			`CREATE TABLE backups (
+				id TEXT PRIMARY KEY,
+				filename TEXT NOT NULL UNIQUE,
+				size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+				sha256 TEXT NOT NULL,
+				format_version INTEGER NOT NULL CHECK (format_version > 0),
+				kind TEXT NOT NULL CHECK (kind IN ('manual', 'safety')),
+				status TEXT NOT NULL CHECK (status IN ('ready', 'failed')),
+				manifest_json TEXT NOT NULL,
+				created_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX backups_created_idx ON backups(created_at DESC, id)`,
+			`CREATE TABLE settings (
+				setting_key TEXT PRIMARY KEY,
+				value_json TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+		},
+		MySQL: []string{
+			`CREATE TABLE console_sessions (
+				id VARCHAR(36) NOT NULL PRIMARY KEY,
+				server_id VARCHAR(36) NOT NULL,
+				mode VARCHAR(32) NOT NULL,
+				ticket_hash BINARY(32) NOT NULL UNIQUE,
+				expires_at DATETIME(6) NOT NULL,
+				opened_at DATETIME(6) NULL,
+				closed_at DATETIME(6) NULL,
+				result VARCHAR(32) NOT NULL,
+				created_at DATETIME(6) NOT NULL,
+				INDEX console_sessions_expiry_idx (expires_at, opened_at),
+				CONSTRAINT console_sessions_mode_check CHECK (mode IN ('embedded')),
+				CONSTRAINT console_sessions_server_fk FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE RESTRICT
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+			`CREATE TABLE backups (
+				id VARCHAR(36) NOT NULL PRIMARY KEY,
+				filename VARCHAR(255) NOT NULL UNIQUE,
+				size_bytes BIGINT NOT NULL,
+				sha256 CHAR(64) NOT NULL,
+				format_version INT NOT NULL,
+				kind VARCHAR(32) NOT NULL,
+				status VARCHAR(32) NOT NULL,
+				manifest_json LONGTEXT NOT NULL,
+				created_at DATETIME(6) NOT NULL,
+				INDEX backups_created_idx (created_at DESC, id),
+				CONSTRAINT backups_size_check CHECK (size_bytes >= 0),
+				CONSTRAINT backups_version_check CHECK (format_version > 0),
+				CONSTRAINT backups_kind_check CHECK (kind IN ('manual', 'safety')),
+				CONSTRAINT backups_status_check CHECK (status IN ('ready', 'failed'))
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+			`CREATE TABLE settings (
+				setting_key VARCHAR(255) NOT NULL PRIMARY KEY,
+				value_json LONGTEXT NOT NULL,
+				updated_at DATETIME(6) NOT NULL
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+		},
+	},
 }

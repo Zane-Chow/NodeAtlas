@@ -16,6 +16,7 @@ type Config struct {
 	Database    DatabaseConfig
 	Auth        AuthBootstrapConfig
 	Secrets     SecretConfig
+	Backup      BackupConfig
 }
 
 type DatabaseConfig struct {
@@ -35,6 +36,10 @@ type AuthBootstrapConfig struct {
 type SecretConfig struct {
 	CredentialKeys   map[int][]byte
 	ActiveKeyVersion int
+}
+
+type BackupConfig struct {
+	Directory string
 }
 
 func Load() (Config, error) {
@@ -87,6 +92,7 @@ func Load() (Config, error) {
 			CredentialKeys:   credentialKeys,
 			ActiveKeyVersion: activeKeyVersion,
 		},
+		Backup: BackupConfig{Directory: envOrDefault("BACKUP_DIRECTORY", "data/backups")},
 	}, nil
 }
 

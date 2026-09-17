@@ -28,10 +28,10 @@
 
 **Files:** `internal/database/migrations.go`, database tests, new console/backup models and repositories, `internal/config/config.go`.
 
-- [ ] Add migration v4 for `console_sessions`, `backups`, and `settings` in both dialects.
-- [ ] Add SQLite/MySQL-safe repositories and contract tests for one-use tickets and backup metadata.
-- [ ] Add `BACKUP_DIRECTORY` configuration with a safe default and directory creation.
-- [ ] Verify migration idempotency and repository behavior.
+- [x] Add migration v4 for `console_sessions`, `backups`, and `settings` in both dialects.
+- [x] Add SQLite/MySQL-safe repositories and contract tests for one-use tickets and backup metadata.
+- [x] Add `BACKUP_DIRECTORY` configuration with a safe default; create it when the backup service starts.
+- [x] Verify migration idempotency and repository behavior.
 
 ### Task 2: Console Target Policy and Service
 
@@ -68,6 +68,7 @@
 **Files:** backup service/HTTP handlers, app composition and tests.
 
 - [ ] Create/list/download backup metadata without exposing filesystem paths or passphrases.
+- [ ] Create the configured backup directory with restrictive permissions when the service starts.
 - [ ] Validate an uploaded or stored archive without changing data.
 - [ ] Before restore, create a safety snapshot using the supplied passphrase; reject restore while non-terminal work is active.
 - [ ] Restore transactionally and append sanitized audit events for create/validate/restore outcomes.

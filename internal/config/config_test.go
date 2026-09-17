@@ -28,6 +28,17 @@ func TestLoadDefaultsToSQLite(t *testing.T) {
 	require.Equal(t, "sqlite://data/controlpanel.db", cfg.Database.URL)
 	require.Equal(t, "127.0.0.1:8080", cfg.HTTP.Address)
 	require.Equal(t, "development", cfg.Environment)
+	require.Equal(t, "data/backups", cfg.Backup.Directory)
+}
+
+func TestLoadAcceptsBackupDirectory(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("BACKUP_DIRECTORY", "/var/lib/controlpanel/backups")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, "/var/lib/controlpanel/backups", cfg.Backup.Directory)
 }
 
 func TestLoadRejectsPartialBootstrapCredentials(t *testing.T) {
