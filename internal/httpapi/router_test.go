@@ -3,11 +3,13 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
 
+	"controlpanel/internal/webassets"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,4 +91,10 @@ func TestAPIV1MountsAuthenticationHandler(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil))
 
 	require.Equal(t, http.StatusNoContent, response.Code)
+}
+
+func TestEmbeddedAssetsContainProductionIndex(t *testing.T) {
+	index, err := fs.ReadFile(webassets.FileSystem(), "index.html")
+	require.NoError(t, err)
+	require.Contains(t, string(index), "/assets/")
 }

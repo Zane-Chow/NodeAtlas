@@ -50,3 +50,12 @@ func TestLoadAcceptsProductionConfiguration(t *testing.T) {
 	require.Equal(t, "panel.example.test", cfg.HTTP.PublicOrigin.Host)
 	require.Equal(t, "mysql://panel:secret@mysql:3306/panel", cfg.Database.URL)
 }
+
+func TestLoadDoesNotExposeMalformedDatabaseSecret(t *testing.T) {
+	t.Setenv("DATABASE_URL", "mysql://admin:super-secret%zz@mysql:3306/panel")
+
+	_, err := Load()
+
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "super-secret")
+}

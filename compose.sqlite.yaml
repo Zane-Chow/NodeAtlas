@@ -1,0 +1,6 @@
+services:
+  app:
+    environment:
+      DATABASE_URL: sqlite:///data/controlpanel.db
+    depends_on: !reset []
+  mysql: !reset null

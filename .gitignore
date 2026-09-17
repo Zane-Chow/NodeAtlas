@@ -1,1 +1,7 @@
 .worktrees/
+/dist/
+data/
+*.db
+*.db-shm
+*.db-wal
+.env

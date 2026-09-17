@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	ErrPasswordEmpty   = errors.New("password must not be empty")
-	ErrPasswordTooLong = errors.New("password exceeds 1024 bytes")
+	ErrPasswordEmpty    = errors.New("password must not be empty")
+	ErrPasswordTooShort = errors.New("password must contain at least 12 bytes")
+	ErrPasswordTooLong  = errors.New("password exceeds 1024 bytes")
 )
 
 type Argon2idParams struct {
@@ -109,6 +110,9 @@ func (hasher *Argon2idHasher) Verify(encodedHash, password string) (bool, error)
 func validatePassword(password string) error {
 	if password == "" {
 		return ErrPasswordEmpty
+	}
+	if len([]byte(password)) < 12 {
+		return ErrPasswordTooShort
 	}
 	if len([]byte(password)) > 1024 {
 		return ErrPasswordTooLong

@@ -2,7 +2,6 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -77,7 +76,7 @@ func Load() (Config, error) {
 func validateDatabaseURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid DATABASE_URL: %w", err)
+		return errors.New("DATABASE_URL is malformed")
 	}
 	switch parsed.Scheme {
 	case "sqlite":

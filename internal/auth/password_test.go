@@ -36,3 +36,11 @@ func TestPasswordRejectsMalformedHashAndOversizedInput(t *testing.T) {
 	_, err = hasher.Hash(strings.Repeat("a", 1025))
 	require.ErrorIs(t, err, ErrPasswordTooLong)
 }
+
+func TestPasswordRejectsShortInput(t *testing.T) {
+	hasher := NewArgon2idHasher(DefaultArgon2idParams())
+
+	_, err := hasher.Hash("short")
+
+	require.ErrorIs(t, err, ErrPasswordTooShort)
+}
