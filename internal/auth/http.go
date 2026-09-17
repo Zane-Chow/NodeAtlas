@@ -24,6 +24,7 @@ const (
 type HTTPOptions struct {
 	PublicOrigin  string
 	SecureCookies bool
+	Protected     http.Handler
 }
 
 type HTTPHandler struct {
@@ -49,8 +50,23 @@ func NewHTTPHandler(service *Service, options HTTPOptions) http.Handler {
 		protected.Get("/auth/me", handler.me)
 		protected.With(handler.requireOrigin, handler.requireCSRF).Post("/auth/logout", handler.logout)
 		protected.With(handler.requireOrigin, handler.requireCSRF).Put("/auth/password", handler.changePassword)
+		if options.Protected != nil {
+			protected.Mount("/", handler.requireMutationSecurity(options.Protected))
+		}
 	})
 	return router
+}
+
+func (handler *HTTPHandler) requireMutationSecurity(next http.Handler) http.Handler {
+	secured := handler.requireOrigin(handler.requireCSRF(next))
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(response, request)
+		default:
+			secured.ServeHTTP(response, request)
+		}
+	})
 }
 
 func (handler *HTTPHandler) setupStatus(response http.ResponseWriter, request *http.Request) {
