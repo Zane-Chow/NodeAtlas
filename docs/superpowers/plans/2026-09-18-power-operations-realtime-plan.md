@@ -428,11 +428,11 @@ git commit -m "feat: add realtime power controls and operation history"
 **Interfaces:**
 - Produces: operator documentation for action validation, idempotency, retries, audit history, and SSE.
 
-- [ ] **Step 1: Document behavior and failure semantics**
+- [x] **Step 1: Document behavior and failure semantics**
 
 Document confirmation requirements, supported state transitions, disabled reasons, idempotency keys, worker retry limits, verification timeouts, operation statuses, event-stream proxy requirements, and the fact that console controls remain in the next milestone.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 Run:
 
@@ -446,11 +446,11 @@ docker build --progress=plain -t controlpanel-power-operations .
 
 Start an isolated SQLite container, initialize the administrator, create a Mock connection containing a stopped server, synchronize it, submit `start`, replay the same idempotency key, and assert one operation reaches `succeeded` and the server becomes `running`. Repeat repository/migration verification with MySQL or `TEST_MYSQL_URL`.
 
-- [ ] **Step 3: Verify non-disclosure and cleanup**
+- [x] **Step 3: Verify non-disclosure and cleanup**
 
 Search responses, logs, audit metadata, SSE payloads, and rendered assets for the submitted Mock token. Confirm no temporary containers or listeners remain and `git diff --check` is clean.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md docs/operations.md
