@@ -1,9 +1,12 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -12,6 +15,7 @@ type Config struct {
 	HTTP        HTTPConfig
 	Database    DatabaseConfig
 	Auth        AuthBootstrapConfig
+	Secrets     SecretConfig
 }
 
 type DatabaseConfig struct {
@@ -28,6 +32,11 @@ type AuthBootstrapConfig struct {
 	Password string
 }
 
+type SecretConfig struct {
+	CredentialKeys   map[int][]byte
+	ActiveKeyVersion int
+}
+
 func Load() (Config, error) {
 	environment := envOrDefault("APP_ENV", "development")
 	databaseURL := envOrDefault("DATABASE_URL", "sqlite://data/controlpanel.db")
@@ -39,6 +48,10 @@ func Load() (Config, error) {
 		return Config{}, errors.New("ADMIN_USERNAME and ADMIN_PASSWORD must be provided together")
 	}
 	if err := validateDatabaseURL(databaseURL); err != nil {
+		return Config{}, err
+	}
+	credentialKeys, activeKeyVersion, err := loadCredentialKeys()
+	if err != nil {
 		return Config{}, err
 	}
 
@@ -70,7 +83,47 @@ func Load() (Config, error) {
 			Username: username,
 			Password: password,
 		},
+		Secrets: SecretConfig{
+			CredentialKeys:   credentialKeys,
+			ActiveKeyVersion: activeKeyVersion,
+		},
 	}, nil
+}
+
+func loadCredentialKeys() (map[int][]byte, int, error) {
+	rawKeys := strings.TrimSpace(os.Getenv("CREDENTIAL_KEYS"))
+	if rawKeys == "" {
+		return nil, 0, errors.New("CREDENTIAL_KEYS is required")
+	}
+	rawActive := strings.TrimSpace(os.Getenv("CREDENTIAL_ACTIVE_KEY_VERSION"))
+	activeVersion, err := strconv.Atoi(rawActive)
+	if err != nil || activeVersion < 1 {
+		return nil, 0, errors.New("CREDENTIAL_ACTIVE_KEY_VERSION must be a positive integer")
+	}
+
+	keys := make(map[int][]byte)
+	for _, entry := range strings.Split(rawKeys, ",") {
+		rawVersion, encoded, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		if !ok {
+			return nil, 0, errors.New("CREDENTIAL_KEYS entries must use version:base64 format")
+		}
+		version, err := strconv.Atoi(strings.TrimSpace(rawVersion))
+		if err != nil || version < 1 {
+			return nil, 0, errors.New("credential key versions must be positive integers")
+		}
+		if _, duplicate := keys[version]; duplicate {
+			return nil, 0, fmt.Errorf("credential key version %d is duplicated", version)
+		}
+		key, err := base64.StdEncoding.Strict().DecodeString(strings.TrimSpace(encoded))
+		if err != nil || len(key) != 32 {
+			return nil, 0, fmt.Errorf("credential key version %d must be base64-encoded 32 bytes", version)
+		}
+		keys[version] = key
+	}
+	if _, ok := keys[activeVersion]; !ok {
+		return nil, 0, errors.New("active credential key version is not configured")
+	}
+	return keys, activeVersion, nil
 }
 
 func validateDatabaseURL(raw string) error {
