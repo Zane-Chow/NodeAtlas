@@ -44,7 +44,7 @@
 - Produces: `audit.Repository.Append(context.Context, audit.Entry) error` and `List(context.Context, audit.Filter) ([]audit.Entry, error)`.
 - Produces: migration version 3 containing `operations` and append-only `audit_logs`.
 
-- [ ] **Step 1: Write failing migration and repository contract tests**
+- [x] **Step 1: Write failing migration and repository contract tests**
 
 ```go
 func TestCreateQueuedIsIdempotentAndRejectsSecondActiveOperation(t *testing.T) {
@@ -63,19 +63,19 @@ func TestCreateQueuedIsIdempotentAndRejectsSecondActiveOperation(t *testing.T) {
 
 Also prove valid transition ordering, terminal operations releasing the active marker, newest-first listing, operation lookup, and immutable audit append/list behavior.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run: `go test ./internal/database ./internal/operations ./internal/audit -v`
 
 Expected: FAIL because migration version 3 and both packages do not exist.
 
-- [ ] **Step 3: Add portable migration version 3**
+- [x] **Step 3: Add portable migration version 3**
 
 Create `operations` with the approved public fields plus a nullable `active_marker`. Set `active_marker = 'active'` for `queued`, `running`, and `verifying`; set it to `NULL` for terminal states. Add `UNIQUE(server_id, active_marker)` so both databases enforce one active operation while allowing multiple terminal rows. Make `idempotency_key` non-empty and unique. Add indexes for newest-first history and connection status queries.
 
 Create append-only `audit_logs` with JSON text metadata, request/source fields, and indexes on creation time and target. Do not expose update/delete repository methods.
 
-- [ ] **Step 4: Implement models and repositories**
+- [x] **Step 4: Implement models and repositories**
 
 ```go
 type Action string
@@ -102,7 +102,7 @@ type Repository interface {
 
 `CreateQueued` performs the idempotency lookup and insert in one transaction. Translate the `(server_id, active_marker)` unique violation to `ErrActiveOperation` and the idempotency unique violation to a lookup of the existing row. `Transition` validates the state graph before updating and clears `active_marker` for terminal states.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `go test ./internal/database ./internal/operations ./internal/audit -v`
 
