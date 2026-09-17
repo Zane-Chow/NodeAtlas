@@ -11,6 +11,7 @@ import (
 	"controlpanel/internal/config"
 	"controlpanel/internal/connections"
 	"controlpanel/internal/database"
+	"controlpanel/internal/events"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/providers"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,25 @@ type recordingAudit struct{ entries []audit.Entry }
 func (repository *recordingAudit) Append(_ context.Context, entry audit.Entry) error {
 	repository.entries = append(repository.entries, entry)
 	return nil
+}
+
+type recordingPublisher struct{ events []events.Event }
+
+func (publisher *recordingPublisher) Publish(event events.Event) {
+	publisher.events = append(publisher.events, event)
+}
+
+func TestServicePublishesQueuedOperationInvalidation(t *testing.T) {
+	service, _, _, _, _ := newOperationServiceFixture(t, inventory.StateStopped, providers.Capabilities{
+		CanStart: providers.Capability{Available: true},
+	})
+	publisher := &recordingPublisher{}
+	service.options.Publisher = publisher
+	_, _, err := service.Request(context.Background(), Request{ServerID: "server-a", Action: ActionStart, IdempotencyKey: "idem-events"})
+	require.NoError(t, err)
+	require.Len(t, publisher.events, 1)
+	require.Equal(t, "operation.updated", publisher.events[0].Type)
+	require.JSONEq(t, `{"operation_id":"operation-a","server_id":"server-a","status":"queued"}`, string(publisher.events[0].Data))
 }
 
 func TestServiceRequestsOneIdempotentPowerOperation(t *testing.T) {

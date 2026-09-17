@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"controlpanel/internal/audit"
+	"controlpanel/internal/events"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/providers"
 	"github.com/google/uuid"
@@ -45,6 +46,7 @@ type ServiceOptions struct {
 	NewID             func() string
 	NewIdempotencyKey func() string
 	NewAuditID        func() string
+	Publisher         events.Publisher
 }
 
 type Service struct {
@@ -119,7 +121,18 @@ func (service *Service) Request(ctx context.Context, request Request) (Operation
 		_, _ = service.repository.Transition(ctx, operation.ID, StatusFailed, Transition{At: now, ErrorCode: "audit_failed", ErrorMessage: "Unable to record operation audit event"})
 		return Operation{}, false, fmt.Errorf("append operation audit: %w", err)
 	}
+	service.publishOperation(operation)
 	return operation, true, nil
+}
+
+func (service *Service) publishOperation(operation Operation) {
+	if service.options.Publisher == nil {
+		return
+	}
+	data, _ := json.Marshal(map[string]string{
+		"operation_id": operation.ID, "server_id": operation.ServerID, "status": string(operation.Status),
+	})
+	service.options.Publisher.Publish(events.Event{Type: "operation.updated", Data: data})
 }
 
 func validAction(action Action) bool {

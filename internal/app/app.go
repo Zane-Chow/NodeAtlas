@@ -10,13 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"controlpanel/internal/audit"
 	"controlpanel/internal/auth"
 	"controlpanel/internal/config"
 	"controlpanel/internal/connections"
 	"controlpanel/internal/database"
+	"controlpanel/internal/events"
 	"controlpanel/internal/httpapi"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/jobs"
+	"controlpanel/internal/operations"
 	"controlpanel/internal/providers"
 	providermock "controlpanel/internal/providers/mock"
 	"controlpanel/internal/secrets"
@@ -98,9 +101,19 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	connectionHandler := connections.NewHTTPHandler(connectionService)
 	inventoryRepository := inventory.NewSQLRepository(db, dialect)
 	inventoryHandler := inventory.NewHTTPHandler(inventoryRepository, connectionService)
+	eventBroker := events.NewBroker(32)
+	eventHandler := events.NewHTTPHandler(eventBroker, events.HTTPOptions{})
+	operationRepository := operations.NewSQLRepository(db, dialect)
+	auditRepository := audit.NewSQLRepository(db, dialect)
+	operationService := operations.NewService(operationRepository, inventoryRepository, queue, auditRepository, operations.ServiceOptions{Publisher: eventBroker})
+	operationHandler := operations.NewHTTPHandler(operationService, operationRepository)
 	featureHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requestPath := chi.RouteContext(request.Context()).RoutePath
 		switch {
+		case requestPath == "/events":
+			eventHandler.ServeHTTP(response, request)
+		case requestPath == "/operations", strings.HasPrefix(requestPath, "/operations/"), strings.Contains(requestPath, "/actions/"):
+			operationHandler.ServeHTTP(response, request)
 		case requestPath == "/provider-types", requestPath == "/connections", strings.HasPrefix(requestPath, "/connections/"):
 			connectionHandler.ServeHTTP(response, request)
 		case requestPath == "/servers", strings.HasPrefix(requestPath, "/servers/"):
@@ -110,17 +123,22 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 		}
 	})
 	syncer := inventory.NewSyncer(connectionRepository, inventoryRepository, credentialCipher, registry, inventory.SyncerOptions{})
+	operationExecutor := operations.NewExecutor(operationRepository, inventoryRepository, connectionRepository, auditRepository, credentialCipher, registry, operations.ExecutorOptions{Publisher: eventBroker})
 	worker := jobs.NewWorker(jobRepository, jobs.HandlerFunc(func(ctx context.Context, job jobs.Job) error {
-		if job.Kind != jobs.KindSyncConnection {
+		switch job.Kind {
+		case jobs.KindSyncConnection:
+			var payload struct {
+				ConnectionID string `json:"connection_id"`
+			}
+			if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.ConnectionID == "" {
+				return errors.New("invalid sync job payload")
+			}
+			return syncer.SyncConnection(ctx, payload.ConnectionID)
+		case jobs.KindPowerOperation:
+			return operationExecutor.Execute(ctx, job)
+		default:
 			return errors.New("unsupported job kind")
 		}
-		var payload struct {
-			ConnectionID string `json:"connection_id"`
-		}
-		if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.ConnectionID == "" {
-			return errors.New("invalid sync job payload")
-		}
-		return syncer.SyncConnection(ctx, payload.ConnectionID)
 	}), jobs.WorkerOptions{})
 	publicOrigin := ""
 	if cfg.HTTP.PublicOrigin != nil {

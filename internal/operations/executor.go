@@ -9,6 +9,7 @@ import (
 
 	"controlpanel/internal/audit"
 	"controlpanel/internal/connections"
+	"controlpanel/internal/events"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/jobs"
 	"controlpanel/internal/providers"
@@ -30,6 +31,7 @@ type ExecutorOptions struct {
 	PollInterval        time.Duration
 	VerificationTimeout time.Duration
 	NewAuditID          func() string
+	Publisher           events.Publisher
 }
 
 type Executor struct {
@@ -80,6 +82,7 @@ func (executor *Executor) Execute(ctx context.Context, job jobs.Job) error {
 		if err != nil {
 			return err
 		}
+		executor.publishOperation(operation)
 	}
 	server, err := executor.inventory.FindByID(ctx, operation.ServerID)
 	if err != nil {
@@ -111,6 +114,7 @@ func (executor *Executor) Execute(ctx context.Context, job jobs.Job) error {
 		if err != nil {
 			return err
 		}
+		executor.publishOperation(operation)
 	}
 	deadline := time.Now().Add(executor.options.VerificationTimeout)
 	for {
@@ -122,12 +126,13 @@ func (executor *Executor) Execute(ctx context.Context, job jobs.Job) error {
 			return executor.succeed(ctx, operation, remote)
 		}
 		if time.Now().After(deadline) {
-			_, transitionErr := executor.operations.Transition(ctx, operation.ID, StatusTimedOut, Transition{
+			timedOut, transitionErr := executor.operations.Transition(ctx, operation.ID, StatusTimedOut, Transition{
 				At: executor.options.Now(), ErrorCode: "operation_timeout", ErrorMessage: "Provider state verification timed out",
 			})
 			if transitionErr != nil {
 				return transitionErr
 			}
+			executor.publishOperation(timedOut)
 			return executor.appendAudit(ctx, operation, "power_operation_timed_out", StatusTimedOut)
 		}
 		timer := time.NewTimer(executor.options.PollInterval)
@@ -193,9 +198,12 @@ func (executor *Executor) succeed(ctx context.Context, operation Operation, remo
 	if err := executor.inventory.UpdateRemote(ctx, operation.ServerID, remote, executor.options.Now().UTC()); err != nil {
 		return err
 	}
-	if _, err := executor.operations.Transition(ctx, operation.ID, StatusSucceeded, Transition{At: executor.options.Now()}); err != nil {
+	executor.publishServer(operation.ServerID)
+	succeeded, err := executor.operations.Transition(ctx, operation.ID, StatusSucceeded, Transition{At: executor.options.Now()})
+	if err != nil {
 		return err
 	}
+	executor.publishOperation(succeeded)
 	return executor.appendAudit(ctx, operation, "power_operation_succeeded", StatusSucceeded)
 }
 
@@ -209,16 +217,36 @@ func (executor *Executor) finishError(ctx context.Context, operation Operation, 
 		return errors.Join(executionErr, findErr)
 	}
 	if !current.Status.terminal() {
-		if _, err := executor.operations.Transition(ctx, operation.ID, StatusFailed, Transition{
+		failed, err := executor.operations.Transition(ctx, operation.ID, StatusFailed, Transition{
 			At: executor.options.Now(), ErrorCode: code, ErrorMessage: message,
-		}); err != nil {
+		})
+		if err != nil {
 			return errors.Join(executionErr, err)
 		}
+		executor.publishOperation(failed)
 		if err := executor.appendAudit(ctx, operation, "power_operation_failed", StatusFailed); err != nil {
 			return errors.Join(executionErr, err)
 		}
 	}
 	return executionErr
+}
+
+func (executor *Executor) publishOperation(operation Operation) {
+	if executor.options.Publisher == nil {
+		return
+	}
+	data, _ := json.Marshal(map[string]string{
+		"operation_id": operation.ID, "server_id": operation.ServerID, "status": string(operation.Status),
+	})
+	executor.options.Publisher.Publish(events.Event{Type: "operation.updated", Data: data})
+}
+
+func (executor *Executor) publishServer(serverID string) {
+	if executor.options.Publisher == nil {
+		return
+	}
+	data, _ := json.Marshal(map[string]string{"server_id": serverID})
+	executor.options.Publisher.Publish(events.Event{Type: "server.updated", Data: data})
 }
 
 func operationError(err error) (string, string, bool) {

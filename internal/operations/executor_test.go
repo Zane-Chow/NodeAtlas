@@ -22,6 +22,8 @@ import (
 
 func TestExecutorStartsAndVerifiesRemoteServer(t *testing.T) {
 	fixture := newExecutorFixture(t, ActionStart, `{"server_count":1,"seed":1}`)
+	publisher := &recordingPublisher{}
+	fixture.executor.options.Publisher = publisher
 	err := fixture.executor.Execute(context.Background(), fixture.job(1, 3))
 	require.NoError(t, err)
 	operation, err := fixture.operations.FindByID(context.Background(), "operation-a")
@@ -34,6 +36,11 @@ func TestExecutorStartsAndVerifiesRemoteServer(t *testing.T) {
 	entries, err := fixture.audit.List(context.Background(), audit.Filter{TargetID: "operation-a"})
 	require.NoError(t, err)
 	require.Equal(t, "power_operation_succeeded", entries[0].EventType)
+	require.Len(t, publisher.events, 4)
+	require.Equal(t, []string{"operation.updated", "operation.updated", "server.updated", "operation.updated"}, []string{
+		publisher.events[0].Type, publisher.events[1].Type, publisher.events[2].Type, publisher.events[3].Type,
+	})
+	require.JSONEq(t, `{"server_id":"server-a"}`, string(publisher.events[2].Data))
 }
 
 func TestExecutorSkipsStartWhenRemoteAlreadyRunning(t *testing.T) {

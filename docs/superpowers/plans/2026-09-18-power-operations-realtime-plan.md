@@ -309,7 +309,7 @@ git commit -m "feat: expose power operations and realtime events"
 - Consumes: operation service/executor/HTTP, event broker/HTTP, audit repository, and both job kinds.
 - Produces: a single composed application in which authenticated action requests are executed by the worker and visible through operations/inventory APIs and SSE.
 
-- [ ] **Step 1: Write a failing composed-flow test**
+- [x] **Step 1: Write a failing composed-flow test**
 
 ```go
 func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
@@ -324,17 +324,17 @@ func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
 
 Also assert unauthenticated access is rejected, mutation security is enforced, replay queues no second job, and `/events` is behind authentication.
 
-- [ ] **Step 2: Run test and verify red**
+- [x] **Step 2: Run test and verify red**
 
 Run: `go test ./internal/app -run PowerOperation -v`
 
 Expected: FAIL because the handlers and worker dispatch are not composed.
 
-- [ ] **Step 3: Wire the milestone into `compose`**
+- [x] **Step 3: Wire the milestone into `compose`**
 
 Register repositories and services once, mount operation/event routes in the protected feature dispatcher, and dispatch `sync_connection` to the syncer and `power_operation` to the executor. Publish operation/server invalidations after queueing and state transitions through injected publisher hooks.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./internal/app ./internal/auth ./internal/... -v`
 
