@@ -129,7 +129,7 @@ git commit -m "feat: persist idempotent power operations and audit events"
 - Produces: `operations.Service.Request(context.Context, Request) (Operation, bool, error)`.
 - Produces: `jobs.KindPowerOperation` and `Queue.EnqueuePowerOperation(context.Context, string) error`.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 ```go
 func TestRequestStartQueuesOneIdempotentOperation(t *testing.T) {
@@ -151,13 +151,13 @@ func TestRequestStartQueuesOneIdempotentOperation(t *testing.T) {
 
 Also cover invalid actions, missing server, disabled capability, current-state conflict, active-operation conflict, generated idempotency keys, and a sanitized `power_operation_queued` audit entry.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run: `go test ./internal/operations ./internal/jobs -run 'Service|Queue' -v`
 
 Expected: FAIL because the service and power job kind do not exist.
 
-- [ ] **Step 3: Add the power job kind and service**
+- [x] **Step 3: Add the power job kind and service**
 
 ```go
 const KindPowerOperation Kind = "power_operation"
@@ -173,7 +173,7 @@ type Request struct {
 
 Parse `inventory.Server.Capabilities` into `providers.Capabilities`, validate the action against capability and state, create the queued operation, enqueue only when `created == true`, and append audit metadata containing only action and operation status. If enqueue fails, transition the newly created operation to `failed` so it does not hold the active marker.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./internal/operations ./internal/jobs ./internal/inventory -v`
 

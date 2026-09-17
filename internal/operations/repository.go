@@ -14,6 +14,7 @@ var (
 type Repository interface {
 	CreateQueued(context.Context, Operation) (Operation, bool, error)
 	FindByID(context.Context, string) (Operation, error)
+	FindByIdempotencyKey(context.Context, string) (Operation, error)
 	List(context.Context, Filter) ([]Operation, error)
 	Transition(context.Context, string, Status, Transition) (Operation, error)
 }

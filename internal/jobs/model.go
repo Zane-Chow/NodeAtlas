@@ -7,7 +7,10 @@ import (
 
 type Kind string
 
-const KindSyncConnection Kind = "sync_connection"
+const (
+	KindSyncConnection Kind = "sync_connection"
+	KindPowerOperation Kind = "power_operation"
+)
 
 type Status string
 

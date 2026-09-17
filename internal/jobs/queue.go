@@ -49,3 +49,18 @@ func (queue *Queue) EnqueueConnectionSync(ctx context.Context, connectionID stri
 		MaxAttempts: queue.maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
 	})
 }
+
+func (queue *Queue) EnqueuePowerOperation(ctx context.Context, operationID string) error {
+	if operationID == "" {
+		return errors.New("operation ID is required")
+	}
+	payload, err := json.Marshal(map[string]string{"operation_id": operationID})
+	if err != nil {
+		return err
+	}
+	now := queue.now().UTC()
+	return queue.repository.Enqueue(ctx, Job{
+		ID: queue.newID(), Kind: KindPowerOperation, Payload: payload, Status: StatusQueued,
+		MaxAttempts: queue.maxAttempts, AvailableAt: now, CreatedAt: now, UpdatedAt: now,
+	})
+}

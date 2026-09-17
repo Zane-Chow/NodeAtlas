@@ -56,6 +56,9 @@ func runRepositoryContract(t *testing.T, repository Repository, now time.Time) {
 	require.NoError(t, err)
 	require.False(t, created)
 	require.Equal(t, "operation-a", replayed.ID)
+	byKey, err := repository.FindByIdempotencyKey(ctx, "idem-a")
+	require.NoError(t, err)
+	require.Equal(t, "operation-a", byKey.ID)
 
 	_, _, err = repository.CreateQueued(ctx, Operation{
 		ID: "operation-b", ServerID: "server-a", ConnectionID: "connection-a", Action: ActionReboot,

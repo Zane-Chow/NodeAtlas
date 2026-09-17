@@ -60,6 +60,10 @@ func (repository *SQLRepository) FindByID(ctx context.Context, id string) (Opera
 	return findOperation(ctx, repository.db, `WHERE id = ?`, id)
 }
 
+func (repository *SQLRepository) FindByIdempotencyKey(ctx context.Context, key string) (Operation, error) {
+	return findOperation(ctx, repository.db, `WHERE idempotency_key = ?`, key)
+}
+
 func (repository *SQLRepository) List(ctx context.Context, filter Filter) ([]Operation, error) {
 	conditions := make([]string, 0, 3)
 	arguments := make([]any, 0, 3)
