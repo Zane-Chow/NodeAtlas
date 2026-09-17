@@ -14,6 +14,7 @@ import (
 type Dependencies struct {
 	Assets    fs.FS
 	Readiness Readiness
+	Auth      http.Handler
 }
 
 type Readiness interface {
@@ -35,6 +36,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		_ = json.NewEncoder(response).Encode(map[string]string{"status": "ready"})
 	})
+	if deps.Auth != nil {
+		router.Mount("/api/v1", deps.Auth)
+	}
 	router.Handle("/*", frontendHandler(deps.Assets))
 	return router
 }

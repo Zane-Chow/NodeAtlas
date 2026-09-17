@@ -75,3 +75,18 @@ func TestHealthReadyReflectsDatabaseStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIV1MountsAuthenticationHandler(t *testing.T) {
+	authHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.WriteHeader(http.StatusNoContent)
+	})
+	router := NewRouter(Dependencies{
+		Assets: fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("app")}},
+		Auth:   authHandler,
+	})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/setup/status", nil))
+
+	require.Equal(t, http.StatusNoContent, response.Code)
+}
