@@ -3,12 +3,14 @@ package inventory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"controlpanel/internal/database"
+	"controlpanel/internal/providers"
 )
 
 type SQLRepository struct {
@@ -129,6 +131,28 @@ func (repository *SQLRepository) FindByID(ctx context.Context, id string) (Serve
 		return Server{}, fmt.Errorf("find server: %w", err)
 	}
 	return server, nil
+}
+
+func (repository *SQLRepository) UpdateRemote(ctx context.Context, id string, remote providers.RemoteServer, at time.Time) error {
+	capabilities, err := json.Marshal(remote.Capabilities)
+	if err != nil {
+		return fmt.Errorf("encode remote capabilities: %w", err)
+	}
+	state := State(remote.State)
+	if !validState(state) {
+		state = StateUnknown
+	}
+	result, err := repository.db.ExecContext(ctx, `UPDATE servers SET name = ?, normalized_state = ?, remote_state = ?,
+		spec_json = ?, addresses_json = ?, capabilities_json = ?, last_seen_at = ?, last_state_checked_at = ?, updated_at = ?
+		WHERE id = ? AND hidden_at IS NULL`, remote.Name, state, remote.RemoteState, string(remote.Spec), string(remote.Addresses),
+		string(capabilities), repository.timeValue(at), repository.timeValue(at), repository.timeValue(at), id)
+	if err != nil {
+		return fmt.Errorf("update remote server: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 type scanFunc func(...any) error

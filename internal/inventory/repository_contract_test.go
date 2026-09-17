@@ -10,6 +10,7 @@ import (
 	"controlpanel/internal/config"
 	"controlpanel/internal/connections"
 	"controlpanel/internal/database"
+	"controlpanel/internal/providers"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,6 +41,16 @@ func runRepositoryContract(t *testing.T, repository Repository, now time.Time) {
 	listed, err := repository.List(ctx, Filter{})
 	require.NoError(t, err)
 	require.Equal(t, []string{"api-01", "db-01"}, []string{listed[0].Name, listed[1].Name})
+	require.NoError(t, repository.UpdateRemote(ctx, "server-a", providers.RemoteServer{
+		ExternalID: "remote-a", Scope: "zone-a", Name: "api-01", State: providers.StateStopped, RemoteState: "STOPPED",
+		Spec: json.RawMessage(`{"cpu":4}`), Addresses: json.RawMessage(`[{"address":"10.0.0.2"}]`),
+		Capabilities: providers.Capabilities{CanStart: providers.Capability{Available: true}},
+	}, now.Add(30*time.Second)))
+	updated, err := repository.FindByID(ctx, "server-a")
+	require.NoError(t, err)
+	require.Equal(t, StateStopped, updated.State)
+	require.Equal(t, "STOPPED", updated.RemoteState)
+	require.JSONEq(t, `{"cpu":4}`, string(updated.Spec))
 
 	refreshed := first
 	refreshed.Name = "api-renamed"

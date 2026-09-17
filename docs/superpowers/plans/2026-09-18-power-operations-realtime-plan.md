@@ -202,7 +202,7 @@ git commit -m "feat: validate and queue server power operations"
 - Produces: `(*Executor).Execute(context.Context, jobs.Job) error` for `jobs.KindPowerOperation`.
 - Produces: `inventory.Repository.UpdateRemote(context.Context, string, providers.RemoteServer, time.Time) error`.
 
-- [ ] **Step 1: Write failing executor tests**
+- [x] **Step 1: Write failing executor tests**
 
 ```go
 func TestExecutorSkipsWriteWhenRemoteAlreadyMatchesTarget(t *testing.T) {
@@ -216,13 +216,13 @@ func TestExecutorSkipsWriteWhenRemoteAlreadyMatchesTarget(t *testing.T) {
 
 Also cover provider call then verification success, reboot requiring a running final state, authentication failure, retryable network failure, bounded verification timeout, malformed payload, credentials decryption, remote inventory refresh, sanitized completion/failure audit events, and Mock state remaining changed when the registry creates another provider instance for the same connection.
 
-- [ ] **Step 2: Run tests and verify red**
+- [x] **Step 2: Run tests and verify red**
 
 Run: `go test ./internal/operations ./internal/inventory -run 'Executor|UpdateRemote' -v`
 
 Expected: FAIL because the executor and single-server update are absent.
 
-- [ ] **Step 3: Implement execution state machine**
+- [x] **Step 3: Implement execution state machine**
 
 On each attempt, load the operation and skip terminal rows. Transition to `running`, construct the provider from decrypted connection credentials, and call `GetServer`. For start/stop, finish immediately if the remote state already matches. Otherwise call the correct provider action once, store the non-sensitive request ID, transition to `verifying`, and poll `GetServer` with configurable intervals until the expected state, terminal provider error, or deadline.
 
@@ -230,7 +230,7 @@ On success, update the local server state/capabilities and transition to `succee
 
 Change the Mock factory to own a mutex-protected map of per-connection server state. Recreating a Mock provider for the same connection reuses that state, while different connection IDs remain isolated. Configuration changes regenerate only that connection's fixture when its deterministic settings fingerprint changes. This makes Mock power behavior equivalent to a persistent remote provider across sync and operation jobs.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `go test ./internal/operations ./internal/inventory ./internal/providers/... -v`
 

@@ -17,7 +17,10 @@ import (
 	"controlpanel/internal/providers"
 )
 
-type Factory struct{}
+type Factory struct {
+	mutex       sync.Mutex
+	connections map[string]*sharedState
+}
 
 type settings struct {
 	ServerCount      int     `json:"server_count"`
@@ -35,16 +38,21 @@ type credentials struct {
 type Provider struct {
 	connectionID string
 	settings     settings
-	mutex        sync.Mutex
-	random       *rand.Rand
-	servers      []providers.RemoteServer
+	state        *sharedState
 }
 
-func NewFactory() Factory {
-	return Factory{}
+type sharedState struct {
+	mutex       sync.Mutex
+	fingerprint string
+	random      *rand.Rand
+	servers     []providers.RemoteServer
 }
 
-func (Factory) Create(config providers.ConnectionConfig) (providers.Provider, error) {
+func NewFactory() *Factory {
+	return &Factory{connections: make(map[string]*sharedState)}
+}
+
+func (factory *Factory) Create(config providers.ConnectionConfig) (providers.Provider, error) {
 	if strings.TrimSpace(config.ID) == "" {
 		return nil, errors.New("mock connection ID is required")
 	}
@@ -73,12 +81,21 @@ func (Factory) Create(config providers.ConnectionConfig) (providers.Provider, er
 	if err := decodeStrict(config.Credentials, &secret); err != nil || strings.TrimSpace(secret.Token) == "" {
 		return nil, errors.New("mock token is required")
 	}
-	provider := &Provider{
-		connectionID: config.ID,
-		settings:     configuration,
-		random:       rand.New(rand.NewSource(configuration.Seed)),
+	fingerprintBytes, _ := json.Marshal(configuration)
+	fingerprint := string(fingerprintBytes)
+	factory.mutex.Lock()
+	defer factory.mutex.Unlock()
+	if factory.connections == nil {
+		factory.connections = make(map[string]*sharedState)
 	}
-	provider.servers = provider.generateServers()
+	state, exists := factory.connections[config.ID]
+	if !exists || state.fingerprint != fingerprint {
+		state = &sharedState{fingerprint: fingerprint, random: rand.New(rand.NewSource(configuration.Seed))}
+		provider := &Provider{connectionID: config.ID, settings: configuration, state: state}
+		state.servers = provider.generateServers()
+		factory.connections[config.ID] = state
+	}
+	provider := &Provider{connectionID: config.ID, settings: configuration, state: state}
 	return provider, nil
 }
 
@@ -96,32 +113,32 @@ func (provider *Provider) ValidateConnection(context.Context) (providers.Connect
 }
 
 func (provider *Provider) ListServers(_ context.Context, cursor *providers.Cursor) (providers.ServerPage, error) {
-	provider.mutex.Lock()
-	defer provider.mutex.Unlock()
+	provider.state.mutex.Lock()
+	defer provider.state.mutex.Unlock()
 	start := 0
 	if cursor != nil {
 		parsed, err := strconv.Atoi(cursor.Value)
-		if err != nil || parsed < 0 || parsed >= len(provider.servers) {
+		if err != nil || parsed < 0 || parsed >= len(provider.state.servers) {
 			return providers.ServerPage{}, &providers.Error{Code: providers.ErrorInvalidConfig, Message: "invalid mock cursor"}
 		}
 		start = parsed
 	}
-	end := min(start+100, len(provider.servers))
-	page := providers.ServerPage{Servers: append([]providers.RemoteServer(nil), provider.servers[start:end]...)}
-	if end < len(provider.servers) {
+	end := min(start+100, len(provider.state.servers))
+	page := providers.ServerPage{Servers: append([]providers.RemoteServer(nil), provider.state.servers[start:end]...)}
+	if end < len(provider.state.servers) {
 		page.Next = &providers.Cursor{Value: strconv.Itoa(end)}
 	}
 	return page, nil
 }
 
 func (provider *Provider) GetServer(_ context.Context, ref providers.ServerRef) (providers.RemoteServer, error) {
-	provider.mutex.Lock()
-	defer provider.mutex.Unlock()
+	provider.state.mutex.Lock()
+	defer provider.state.mutex.Unlock()
 	index := provider.findServer(ref)
 	if index < 0 {
 		return providers.RemoteServer{}, &providers.Error{Code: providers.ErrorNotFound, Message: "mock server not found"}
 	}
-	return provider.servers[index], nil
+	return provider.state.servers[index], nil
 }
 
 func (provider *Provider) StartServer(ctx context.Context, ref providers.ServerRef) (providers.ActionReceipt, error) {
@@ -171,24 +188,24 @@ func (provider *Provider) changeState(ctx context.Context, ref providers.ServerR
 		case <-timer.C:
 		}
 	}
-	provider.mutex.Lock()
-	defer provider.mutex.Unlock()
-	if provider.random.Float64() < provider.settings.FailureRate {
+	provider.state.mutex.Lock()
+	defer provider.state.mutex.Unlock()
+	if provider.state.random.Float64() < provider.settings.FailureRate {
 		return providers.ActionReceipt{}, &providers.Error{Code: providers.ErrorProvider, Message: "mock operation failed", Retryable: true}
 	}
 	index := provider.findServer(ref)
 	if index < 0 {
 		return providers.ActionReceipt{}, &providers.Error{Code: providers.ErrorNotFound, Message: "mock server not found"}
 	}
-	provider.servers[index].State = state
-	provider.servers[index].RemoteState = strings.ToUpper(string(state))
-	provider.servers[index].Capabilities = provider.capabilities(state)
-	return providers.ActionReceipt{RequestID: fmt.Sprintf("mock-%d", provider.random.Int63())}, nil
+	provider.state.servers[index].State = state
+	provider.state.servers[index].RemoteState = strings.ToUpper(string(state))
+	provider.state.servers[index].Capabilities = provider.capabilities(state)
+	return providers.ActionReceipt{RequestID: fmt.Sprintf("mock-%d", provider.state.random.Int63())}, nil
 }
 
 func (provider *Provider) findServer(ref providers.ServerRef) int {
-	for index := range provider.servers {
-		if provider.servers[index].ExternalID == ref.ExternalID && provider.servers[index].Scope == ref.Scope {
+	for index := range provider.state.servers {
+		if provider.state.servers[index].ExternalID == ref.ExternalID && provider.state.servers[index].Scope == ref.Scope {
 			return index
 		}
 	}

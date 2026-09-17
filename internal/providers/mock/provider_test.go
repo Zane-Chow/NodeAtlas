@@ -98,3 +98,33 @@ func TestProviderRejectsUnknownSettingsAndMissingToken(t *testing.T) {
 	})
 	require.Error(t, err)
 }
+
+func TestFactoryPreservesPowerStateAcrossProviderInstances(t *testing.T) {
+	factory := NewFactory()
+	configuration := providers.ConnectionConfig{
+		ID: "lab-persistent", Type: "mock", Settings: json.RawMessage(`{"server_count":1,"seed":1}`),
+		Credentials: json.RawMessage(`{"token":"valid"}`),
+	}
+	first, err := factory.Create(configuration)
+	require.NoError(t, err)
+	page, err := first.ListServers(context.Background(), nil)
+	require.NoError(t, err)
+	require.Equal(t, providers.StateStopped, page.Servers[0].State)
+	ref := providers.ServerRef{ExternalID: page.Servers[0].ExternalID, Scope: page.Servers[0].Scope}
+	_, err = first.StartServer(context.Background(), ref)
+	require.NoError(t, err)
+
+	second, err := factory.Create(configuration)
+	require.NoError(t, err)
+	server, err := second.GetServer(context.Background(), ref)
+	require.NoError(t, err)
+	require.Equal(t, providers.StateRunning, server.State)
+
+	isolated, err := factory.Create(providers.ConnectionConfig{
+		ID: "lab-isolated", Type: "mock", Settings: configuration.Settings, Credentials: configuration.Credentials,
+	})
+	require.NoError(t, err)
+	isolatedPage, err := isolated.ListServers(context.Background(), nil)
+	require.NoError(t, err)
+	require.Equal(t, providers.StateStopped, isolatedPage.Servers[0].State)
+}
