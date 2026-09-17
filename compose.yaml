@@ -10,6 +10,8 @@ services:
       DATABASE_URL: mysql://${MYSQL_USER:-controlpanel}:${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}@mysql:3306/${MYSQL_DATABASE:-controlpanel}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      CREDENTIAL_KEYS: ${CREDENTIAL_KEYS:?CREDENTIAL_KEYS is required}
+      CREDENTIAL_ACTIVE_KEY_VERSION: ${CREDENTIAL_ACTIVE_KEY_VERSION:-1}
     depends_on:
       mysql:
         condition: service_healthy
