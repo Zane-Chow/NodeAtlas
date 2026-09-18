@@ -57,11 +57,11 @@
 
 **Files:** new `internal/backup` crypto, schema, exporter/restorer and tests.
 
-- [ ] Write round-trip, wrong-passphrase, tamper and manifest-validation tests.
-- [ ] Implement versioned JSON logical records for users, connections (encrypted credentials included), servers, operations, jobs, audit logs, console sessions and settings.
-- [ ] Normalize binary, boolean, nullable and timestamp fields across dialects.
-- [ ] Encrypt with scrypt + AES-256-GCM and compute an envelope checksum.
-- [ ] Restore by deleting child tables and inserting parents in explicit referential order inside one transaction.
+- [x] Write round-trip, wrong-passphrase, tamper and manifest-validation tests.
+- [x] Implement versioned JSON logical records for users, connections (encrypted credentials included), servers, operations, jobs, audit logs, console sessions and settings.
+- [x] Normalize binary, boolean, nullable and timestamp fields across dialects.
+- [x] Encrypt with scrypt + AES-256-GCM; the file service records the envelope checksum.
+- [x] Restore by deleting child tables and inserting parents in explicit referential order inside one transaction.
 
 ### Task 5: Backup Files, Safety Snapshot and HTTP API
 
