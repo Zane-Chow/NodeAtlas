@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -30,8 +31,12 @@ func TestEnvelopeRejectsTamperingAndInvalidManifest(t *testing.T) {
 	archive := Archive{FormatVersion: CurrentFormatVersion, CreatedAt: time.Now().UTC(), SourceDialect: database.DialectSQLite, Manifest: map[string]int{}, Tables: map[string]TableData{}}
 	sealed, err := Seal(archive, "correct horse backup passphrase", bytes.NewReader(bytes.Repeat([]byte{8}, 128)))
 	require.NoError(t, err)
-	sealed[len(sealed)-4] ^= 1
-	_, err = Open(sealed, "correct horse backup passphrase")
+	var envelope encryptedEnvelope
+	require.NoError(t, json.Unmarshal(sealed, &envelope))
+	envelope.Ciphertext[0] ^= 1
+	tampered, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	_, err = Open(tampered, "correct horse backup passphrase")
 	require.ErrorIs(t, err, ErrInvalidBackup)
 
 	archive.Manifest["users"] = 1
