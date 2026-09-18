@@ -98,7 +98,7 @@
 
 - [x] Document target policy, proxy requirements, ticket lifetime, backup key ownership and recovery limits.
 - [x] Add a dedicated backup volume/directory to direct and Compose deployment examples.
-- [ ] Run full Go/frontend tests, lint, production build and Docker image build.
-- [ ] Exercise all four Mock console profiles and create/validate/restore a backup on SQLite.
-- [ ] Restore the SQLite-created archive into MySQL and verify record counts and encrypted credentials.
-- [ ] Search responses, logs, database values, archives and assets for submitted console/backup secrets; remove all temporary services and listeners.
+- [x] Run full Go/frontend tests, lint, production build and Docker image build.
+- [x] Exercise all four Mock console profiles and create/validate/restore a backup on SQLite.
+- [x] Restore the SQLite-created archive into MySQL and verify record counts and encrypted credentials.
+- [x] Search responses, logs, database values, archives and assets for submitted console/backup secrets; remove all temporary services and listeners.
