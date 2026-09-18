@@ -19,6 +19,7 @@ type Config struct {
 	Secrets     SecretConfig
 	Backup      BackupConfig
 	Console     ConsoleConfig
+	Providers   ProviderConfig
 }
 
 type DatabaseConfig struct {
@@ -48,6 +49,10 @@ type ConsoleConfig struct {
 	AllowedPrivateCIDRs []string
 }
 
+type ProviderConfig struct {
+	AllowedPrivateCIDRs []string
+}
+
 func Load() (Config, error) {
 	environment := envOrDefault("APP_ENV", "development")
 	databaseURL := envOrDefault("DATABASE_URL", "sqlite://data/controlpanel.db")
@@ -65,7 +70,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	allowedPrivateCIDRs, err := loadConsoleAllowedPrivateCIDRs()
+	allowedPrivateCIDRs, err := loadAllowedPrivateCIDRs("CONSOLE_ALLOWED_PRIVATE_CIDRS")
+	if err != nil {
+		return Config{}, err
+	}
+	providerAllowedPrivateCIDRs, err := loadAllowedPrivateCIDRs("PROVIDER_ALLOWED_PRIVATE_CIDRS")
 	if err != nil {
 		return Config{}, err
 	}
@@ -104,11 +113,14 @@ func Load() (Config, error) {
 		},
 		Backup:  BackupConfig{Directory: envOrDefault("BACKUP_DIRECTORY", "data/backups")},
 		Console: ConsoleConfig{AllowedPrivateCIDRs: allowedPrivateCIDRs},
+		Providers: ProviderConfig{
+			AllowedPrivateCIDRs: providerAllowedPrivateCIDRs,
+		},
 	}, nil
 }
 
-func loadConsoleAllowedPrivateCIDRs() ([]string, error) {
-	raw := strings.TrimSpace(os.Getenv("CONSOLE_ALLOWED_PRIVATE_CIDRS"))
+func loadAllowedPrivateCIDRs(environmentKey string) ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(environmentKey))
 	if raw == "" {
 		return nil, nil
 	}
@@ -121,10 +133,10 @@ func loadConsoleAllowedPrivateCIDRs() ([]string, error) {
 		value := strings.TrimSpace(entry)
 		_, network, err := net.ParseCIDR(value)
 		if err != nil {
-			return nil, fmt.Errorf("CONSOLE_ALLOWED_PRIVATE_CIDRS contains invalid CIDR %q", value)
+			return nil, fmt.Errorf("%s contains invalid CIDR %q", environmentKey, value)
 		}
 		if !cidrWithinPrivateRoot(network, privateRoots) {
-			return nil, fmt.Errorf("CONSOLE_ALLOWED_PRIVATE_CIDRS entry %q must be a private network", value)
+			return nil, fmt.Errorf("%s entry %q must be a private network", environmentKey, value)
 		}
 		canonical := network.String()
 		if _, duplicate := seen[canonical]; duplicate {

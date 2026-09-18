@@ -13,6 +13,26 @@ func setValidCredentialKeys(t *testing.T) {
 	t.Setenv("CREDENTIAL_KEYS", "1:"+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	t.Setenv("CREDENTIAL_ACTIVE_KEY_VERSION", "1")
 	t.Setenv("CONSOLE_ALLOWED_PRIVATE_CIDRS", "")
+	t.Setenv("PROVIDER_ALLOWED_PRIVATE_CIDRS", "")
+}
+
+func TestLoadAcceptsProviderAllowedPrivateCIDRs(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("PROVIDER_ALLOWED_PRIVATE_CIDRS", "10.30.0.0/16, fd10::/16")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"10.30.0.0/16", "fd10::/16"}, cfg.Providers.AllowedPrivateCIDRs)
+}
+
+func TestLoadRejectsPublicProviderAllowedCIDR(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("PROVIDER_ALLOWED_PRIVATE_CIDRS", "198.51.100.0/24")
+
+	_, err := Load()
+
+	require.ErrorContains(t, err, "PROVIDER_ALLOWED_PRIVATE_CIDRS")
 }
 
 func TestLoadDefaultsToSQLite(t *testing.T) {

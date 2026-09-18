@@ -35,6 +35,11 @@ func TestWebSocketGatewayConsumesTicketAndRunsMockConsole(t *testing.T) {
 	_, echoed, err := connection.Read(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, "status", string(echoed))
+	require.NoError(t, connection.Write(context.Background(), websocket.MessageBinary, []byte{0, 1, 2, 255}))
+	messageType, echoedBinary, err := connection.Read(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, websocket.MessageBinary, messageType)
+	require.Equal(t, []byte{0, 1, 2, 255}, echoedBinary)
 	require.NoError(t, connection.Close(websocket.StatusNormalClosure, "done"))
 
 	_, response, err := websocket.Dial(context.Background(), address, nil)

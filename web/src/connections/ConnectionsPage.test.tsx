@@ -39,6 +39,74 @@ it('creates another Mock connection without rendering its credential', async () 
   await waitFor(() => expect(requests.some(({ init }) => String(init?.body).includes('write-only-token'))).toBe(true))
 })
 
+it('creates an AWS connection with multiple regions and write-only static credentials', async () => {
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'aws', name: 'AWS EC2' }, { id: 'mock', name: 'Mock Provider' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'aws-a', name: '生产 AWS', provider_type: 'aws', endpoint: '', settings: { regions: ['us-east-1', 'eu-west-1'] },
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.selectOptions(screen.getByLabelText('服务商类型'), 'aws')
+  await userEvent.type(screen.getByLabelText('连接名称'), '生产 AWS')
+  await userEvent.type(screen.getByLabelText('AWS Regions'), 'us-east-1, eu-west-1')
+  await userEvent.type(screen.getByLabelText('Access Key ID'), 'AKIATEST')
+  await userEvent.type(screen.getByLabelText('Secret Access Key'), 'write-only-secret')
+  await userEvent.type(screen.getByLabelText('Session Token（可选）'), 'write-only-session')
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toMatchObject({
+    name: '生产 AWS', provider_type: 'aws', settings: { regions: ['us-east-1', 'eu-west-1'] },
+    credentials: { access_key_id: 'AKIATEST', secret_access_key: 'write-only-secret', session_token: 'write-only-session' },
+  }))
+  expect(screen.queryByText('write-only-secret')).not.toBeInTheDocument()
+})
+
+it('creates a VirtFusion connection with a write-only bearer token', async () => {
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'virtfusion', name: 'VirtFusion' }, { id: 'mock', name: 'Mock Provider' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'vf-a', name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test', settings: { page_size: 100 },
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.selectOptions(screen.getByLabelText('服务商类型'), 'virtfusion')
+  await userEvent.type(screen.getByLabelText('连接名称'), 'VF 欧洲节点')
+  await userEvent.type(screen.getByLabelText('VirtFusion 面板地址'), 'https://vf.example.test')
+  await userEvent.clear(screen.getByLabelText('每页服务器数'))
+  await userEvent.type(screen.getByLabelText('每页服务器数'), '100')
+  await userEvent.type(screen.getByLabelText('API Bearer Token'), 'write-only-vf-token')
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toMatchObject({
+    name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test',
+    settings: { page_size: 100 }, credentials: { token: 'write-only-vf-token' },
+  }))
+  expect(screen.queryByText('write-only-vf-token')).not.toBeInTheDocument()
+})
+
 it('tests and synchronizes a connection', async () => {
   const calls: string[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

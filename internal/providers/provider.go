@@ -115,8 +115,10 @@ const (
 )
 
 type ConsoleTarget struct {
-	Mode ConsoleMode `json:"mode"`
-	URL  *url.URL    `json:"-"`
+	Mode     ConsoleMode `json:"mode"`
+	Protocol string      `json:"-"`
+	URL      *url.URL    `json:"-"`
+	Password string      `json:"-"`
 }
 
 type Provider interface {

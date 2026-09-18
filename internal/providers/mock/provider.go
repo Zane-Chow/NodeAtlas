@@ -168,7 +168,7 @@ func (provider *Provider) OpenConsole(_ context.Context, ref providers.ServerRef
 		scheme = "mock+ws"
 	}
 	target, _ := url.Parse(scheme + "://" + host)
-	return providers.ConsoleTarget{Mode: mode, URL: target}, nil
+	return providers.ConsoleTarget{Mode: mode, Protocol: "terminal", URL: target}, nil
 }
 
 func (provider *Provider) ProviderPortalURL(_ context.Context, ref providers.ServerRef) (*url.URL, error) {

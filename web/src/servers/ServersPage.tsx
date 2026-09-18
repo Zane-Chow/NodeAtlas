@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listConnections } from '../connections/api'
 import type { ProviderConnection } from '../connections/types'
 import { ConsoleDialog } from '../console/ConsoleDialog'
-import { createEmbeddedConsole, openConsoleWindow, openProviderPortal } from '../console/api'
+import { createEmbeddedConsole, openConsoleWindow, openEmbeddedConsoleWindow, openProviderPortal } from '../console/api'
 import type { ConsoleSession } from '../console/types'
 import { useServerEvents } from '../events/useServerEvents'
 import { requestPowerAction } from '../operations/api'
@@ -96,7 +96,12 @@ export function ServersPage() {
         setConsoleSession(session)
         return
       }
-      const opened = mode === 'window' ? await openConsoleWindow(selected.id) : await openProviderPortal(selected.id)
+      const providerType = connectionByID.get(selected.connection_id)?.provider_type
+      const opened = mode === 'window'
+        ? providerType === 'virtfusion'
+          ? await openEmbeddedConsoleWindow(selected.id, selected.name)
+          : await openConsoleWindow(selected.id)
+        : await openProviderPortal(selected.id)
       if (!opened) setNotice('链接已生成；如果没有打开，请允许此站点弹出新窗口')
     } catch {
       setActionError('无法打开控制台，请尝试其他可用方式')

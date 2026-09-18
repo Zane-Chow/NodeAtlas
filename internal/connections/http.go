@@ -35,6 +35,10 @@ func (handler *HTTPHandler) providerTypes(response http.ResponseWriter, _ *http.
 		name := strings.ToUpper(providerType[:1]) + providerType[1:] + " Provider"
 		if providerType == "mock" {
 			name = "Mock Provider"
+		} else if providerType == "aws" {
+			name = "AWS EC2"
+		} else if providerType == "virtfusion" {
+			name = "VirtFusion"
 		}
 		types = append(types, map[string]string{"id": providerType, "name": name})
 	}

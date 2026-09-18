@@ -45,9 +45,15 @@ type ConsoleOptions struct {
 	Order    []string `json:"order"`
 }
 type SessionTicket struct {
-	SessionID string    `json:"session_id"`
-	Ticket    string    `json:"ticket"`
-	ExpiresAt time.Time `json:"expires_at"`
+	SessionID   string              `json:"session_id"`
+	Ticket      string              `json:"ticket"`
+	ExpiresAt   time.Time           `json:"expires_at"`
+	Protocol    string              `json:"protocol"`
+	Credentials *SessionCredentials `json:"credentials,omitempty"`
+}
+
+type SessionCredentials struct {
+	Password string `json:"password"`
 }
 type ExternalTarget struct {
 	URL string `json:"url"`
@@ -144,7 +150,15 @@ func (service *Service) CreateEmbedded(ctx context.Context, serverID, requestID,
 		_ = service.sessions.Close(ctx, session.ID, ResultFailed, now)
 		return SessionTicket{}, err
 	}
-	return SessionTicket{SessionID: session.ID, Ticket: ticket, ExpiresAt: session.ExpiresAt}, nil
+	protocol := target.Protocol
+	if protocol == "" {
+		protocol = "terminal"
+	}
+	created := SessionTicket{SessionID: session.ID, Ticket: ticket, ExpiresAt: session.ExpiresAt, Protocol: protocol}
+	if protocol == "rfb" && target.Password != "" {
+		created.Credentials = &SessionCredentials{Password: target.Password}
+	}
+	return created, nil
 }
 
 func (service *Service) OpenWindow(ctx context.Context, serverID, requestID, sourceIP string) (ExternalTarget, error) {

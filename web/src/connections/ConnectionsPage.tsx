@@ -66,7 +66,7 @@ export function ConnectionsPage() {
     {notice && <p className="inline-notice" role="status">{notice}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {showForm && <ConnectionForm providerTypes={providerTypes} onCancel={() => setShowForm(false)} onSubmit={handleCreate} />}
-    {loading ? <p className="empty-state">正在加载连接…</p> : connections.length === 0 ? <p className="empty-state">还没有服务商连接，请先添加 Mock Provider。</p> : <div className="connection-grid">
+    {loading ? <p className="empty-state">正在加载连接…</p> : connections.length === 0 ? <p className="empty-state">还没有服务商连接，请先添加服务商。</p> : <div className="connection-grid">
       {connections.map((connection) => <article className="connection-card" key={connection.id}>
         <div className="card-title"><div><span className="provider-badge">{connection.provider_type}</span><h3>{connection.name}</h3></div><span className={`health-chip ${connection.health_status}`}>{healthLabels[connection.health_status]}</span></div>
         <dl><div><dt>状态</dt><dd>{connection.enabled ? '已启用' : '已停用'}</dd></div><div><dt>上次同步</dt><dd>{connection.last_synced_at ? new Date(connection.last_synced_at).toLocaleString() : '尚未同步'}</dd></div></dl>
@@ -81,26 +81,56 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
   onCancel(): void
   onSubmit(input: Parameters<typeof createConnection>[0]): Promise<void>
 }) {
+  const [providerType, setProviderType] = useState(() => providerTypes.find((item) => item.id === 'mock')?.id ?? providerTypes[0]?.id ?? 'mock')
   const [name, setName] = useState('')
   const [serverCount, setServerCount] = useState('4')
   const [token, setToken] = useState('')
   const [consoleProfile, setConsoleProfile] = useState('embedded')
+  const [regions, setRegions] = useState('')
+  const [accessKeyID, setAccessKeyID] = useState('')
+  const [secretAccessKey, setSecretAccessKey] = useState('')
+  const [sessionToken, setSessionToken] = useState('')
+  const [virtFusionEndpoint, setVirtFusionEndpoint] = useState('')
+  const [virtFusionToken, setVirtFusionToken] = useState('')
+  const [virtFusionPageSize, setVirtFusionPageSize] = useState('200')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
     event.preventDefault(); setSubmitting(true); setError('')
     try {
-      await onSubmit({ name, provider_type: providerTypes[0]?.id ?? 'mock', endpoint: '', enabled: true,
-        settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
+      if (providerType === 'aws') {
+        await onSubmit({ name, provider_type: 'aws', endpoint: '', enabled: true,
+          settings: { regions: regions.split(',').map((region) => region.trim()).filter(Boolean) },
+          credentials: { access_key_id: accessKeyID, secret_access_key: secretAccessKey, ...(sessionToken.trim() ? { session_token: sessionToken } : {}) } })
+      } else if (providerType === 'virtfusion') {
+        await onSubmit({ name, provider_type: 'virtfusion', endpoint: virtFusionEndpoint.trim(), enabled: true,
+          settings: { page_size: Number(virtFusionPageSize) }, credentials: { token: virtFusionToken } })
+      } else {
+        await onSubmit({ name, provider_type: 'mock', endpoint: '', enabled: true,
+          settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
+      }
     } catch { setError('无法保存连接，请检查配置') }
     finally { setSubmitting(false) }
   }
   return <div className="modal-backdrop"><form className="modal-card" aria-label="添加服务商" onSubmit={(event) => void submit(event)}>
-    <div><p className="eyebrow">New connection</p><h3>添加 Mock Provider</h3></div>
+    <div><p className="eyebrow">New connection</p><h3>添加服务商连接</h3></div>
+    <label htmlFor="provider-type">服务商类型</label><select id="provider-type" value={providerType} onChange={(event) => setProviderType(event.target.value)}>{providerTypes.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
     <label htmlFor="connection-name">连接名称</label><input id="connection-name" value={name} onChange={(event) => setName(event.target.value)} required />
-    <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />
-    <label htmlFor="console-profile">控制台能力</label><select id="console-profile" value={consoleProfile} onChange={(event) => setConsoleProfile(event.target.value)}><option value="embedded">内嵌 + 新窗口</option><option value="window">仅新窗口</option><option value="portal">仅服务商后台</option><option value="none">不可用</option></select>
-    <label htmlFor="mock-token">Mock Token</label><input id="mock-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} required autoComplete="new-password" />
+    {providerType === 'aws' ? <>
+      <label htmlFor="aws-regions">AWS Regions</label><input id="aws-regions" value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, eu-west-1" required />
+      <label htmlFor="aws-access-key">Access Key ID</label><input id="aws-access-key" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} required autoComplete="off" />
+      <label htmlFor="aws-secret-key">Secret Access Key</label><input id="aws-secret-key" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} required autoComplete="new-password" />
+      <label htmlFor="aws-session-token">Session Token（可选）</label><input id="aws-session-token" type="password" value={sessionToken} onChange={(event) => setSessionToken(event.target.value)} autoComplete="new-password" />
+    </> : providerType === 'virtfusion' ? <>
+      <label htmlFor="virtfusion-endpoint">VirtFusion 面板地址</label><input id="virtfusion-endpoint" type="url" value={virtFusionEndpoint} onChange={(event) => setVirtFusionEndpoint(event.target.value)} placeholder="https://panel.example.com" required />
+      <label htmlFor="virtfusion-page-size">每页服务器数</label><input id="virtfusion-page-size" type="number" min="1" max="200" value={virtFusionPageSize} onChange={(event) => setVirtFusionPageSize(event.target.value)} required />
+      <label htmlFor="virtfusion-token">API Bearer Token</label><input id="virtfusion-token" type="password" value={virtFusionToken} onChange={(event) => setVirtFusionToken(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
+    </> : <>
+      <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />
+      <label htmlFor="console-profile">控制台能力</label><select id="console-profile" value={consoleProfile} onChange={(event) => setConsoleProfile(event.target.value)}><option value="embedded">内嵌 + 新窗口</option><option value="window">仅新窗口</option><option value="portal">仅服务商后台</option><option value="none">不可用</option></select>
+      <label htmlFor="mock-token">Mock Token</label><input id="mock-token" type="password" value={token} onChange={(event) => setToken(event.target.value)} required autoComplete="new-password" />
+    </>}
     <p className="field-note">凭据加密保存，保存后不会再次显示。</p>{error && <p className="form-error" role="alert">{error}</p>}
     <div className="modal-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary-button compact" disabled={submitting}>{submitting ? '保存中…' : '保存并同步'}</button></div>
   </form></div>

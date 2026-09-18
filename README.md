@@ -1,6 +1,6 @@
 # Server Control Panel
 
-单用户、多服务商服务器控制面板。阶段一基础版已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份。当前使用 Mock 服务商验证完整流程，下一阶段接入 AWS 与 VirtFusion。
+单用户、多服务商服务器控制面板。当前版本已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份，并已接入 Mock、AWS EC2 与 VirtFusion。
 
 ## 当前功能
 
@@ -13,7 +13,7 @@
 - 根据能力支持面板内嵌控制台、新窗口临时控制台和服务商后台三级回退。
 - 支持创建、下载、校验和恢复应用级加密备份；恢复前自动创建安全快照。
 
-电源操作、控制台和备份运维要求分别见 [docs/operations.md](docs/operations.md)、[docs/console.md](docs/console.md) 和 [docs/backups.md](docs/backups.md)。
+电源操作、控制台、服务商接入和备份运维要求分别见 [docs/operations.md](docs/operations.md)、[docs/console.md](docs/console.md)、[docs/providers.md](docs/providers.md) 和 [docs/backups.md](docs/backups.md)。
 
 ## 单文件运行
 
@@ -66,6 +66,10 @@ SQLite 与 MySQL 是部署时二选一，不会双写。跨数据库迁移必须
 登录后进入“服务商”页面，创建 Mock 连接并选择服务器数量和控制台能力。连接创建后可执行“测试连接”和“立即同步”；同步任务由后台工作器处理，完成后服务器会出现在“服务器”页面。打开服务器详情即可执行符合能力要求的电源操作，或演示内嵌、新窗口、仅后台和完全不可用四种控制台组合。Mock 凭据仅用于验证加密存储和交互流程，不会访问外部服务。
 
 `CREDENTIAL_KEYS` 可以用逗号配置多个版本，例如 `1:<旧密钥>,2:<新密钥>`；`CREDENTIAL_ACTIVE_KEY_VERSION` 指定新写入数据使用的版本。轮换期间保留仍被数据库记录引用的旧密钥。
+
+## AWS 与 VirtFusion
+
+AWS 连接使用一个静态 Access Key、Secret Access Key、可选 Session Token 和显式区域列表；不会读取宿主机环境变量、共享凭据文件或实例角色。VirtFusion 连接使用面板 HTTPS 地址和 Bearer Token，支持 API v1 清单、电源操作及 VirtFusion 6.1+ VNC。自托管面板若解析到私网地址，必须用 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 显式放行所需的最小网段。
 
 ## 测试
 

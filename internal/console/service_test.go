@@ -33,6 +33,8 @@ func TestServiceCreatesHashedOneUseEmbeddedTicketWithoutExposingTarget(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "fixed-console-ticket", created.Ticket)
 	require.Equal(t, fixture.now.Add(time.Minute), created.ExpiresAt)
+	require.Equal(t, "rfb", created.Protocol)
+	require.Equal(t, "temporary-vnc-password", created.Credentials.Password)
 	require.NotContains(t, string(mustJSON(t, created)), "provider-temporary-secret")
 
 	expectedHash := sha256.Sum256([]byte("fixed-console-ticket"))
@@ -184,7 +186,7 @@ func (fakeConsoleProvider) RebootServer(context.Context, providers.ServerRef) (p
 }
 func (fakeConsoleProvider) OpenConsole(_ context.Context, _ providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
 	if mode == providers.ConsoleEmbedded {
-		return providers.ConsoleTarget{Mode: mode, URL: mustProviderURL("wss://console.example.test/embedded?token=provider-temporary-secret")}, nil
+		return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", URL: mustProviderURL("wss://console.example.test/embedded?token=provider-temporary-secret"), Password: "temporary-vnc-password"}, nil
 	}
 	return providers.ConsoleTarget{Mode: mode, URL: mustProviderURL("https://console.example.test/window")}, nil
 }

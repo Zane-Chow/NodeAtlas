@@ -24,7 +24,9 @@ import (
 	"controlpanel/internal/jobs"
 	"controlpanel/internal/operations"
 	"controlpanel/internal/providers"
+	provideraws "controlpanel/internal/providers/aws"
 	providermock "controlpanel/internal/providers/mock"
+	providervirtfusion "controlpanel/internal/providers/virtfusion"
 	"controlpanel/internal/secrets"
 	"controlpanel/internal/webassets"
 	"github.com/go-chi/chi/v5"
@@ -97,6 +99,16 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	if err := registry.Register("mock", providermock.NewFactory()); err != nil {
 		return nil, nil, err
 	}
+	if err := registry.Register("aws", provideraws.NewFactory()); err != nil {
+		return nil, nil, err
+	}
+	allowedProviderCIDRs, err := parseAllowedCIDRs(cfg.Providers.AllowedPrivateCIDRs, "provider")
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := registry.Register("virtfusion", providervirtfusion.NewFactory(providervirtfusion.FactoryOptions{AllowedPrivateCIDRs: allowedProviderCIDRs})); err != nil {
+		return nil, nil, err
+	}
 	connectionRepository := connections.NewSQLRepository(db, dialect)
 	jobRepository := jobs.NewSQLRepository(db, dialect)
 	queue := jobs.NewQueue(jobRepository, jobs.QueueOptions{})
@@ -112,10 +124,11 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	operationHandler := operations.NewHTTPHandler(operationService, operationRepository)
 	consoleRepository := consoleapi.NewSQLRepository(db, dialect)
 	consoleTargets := consoleapi.NewMemoryTargetStore()
-	allowedConsoleCIDRs, err := parseAllowedConsoleCIDRs(cfg.Console.AllowedPrivateCIDRs)
+	allowedConsoleCIDRs, err := parseAllowedCIDRs(cfg.Console.AllowedPrivateCIDRs, "console")
 	if err != nil {
 		return nil, nil, err
 	}
+	allowedConsoleCIDRs = append(allowedConsoleCIDRs, allowedProviderCIDRs...)
 	consolePolicy := consoleapi.NewTargetPolicy(nil, consoleapi.TargetPolicyOptions{
 		AllowMockTransport:  true,
 		AllowedPrivateCIDRs: allowedConsoleCIDRs,
@@ -184,12 +197,12 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	return handler, worker, nil
 }
 
-func parseAllowedConsoleCIDRs(values []string) ([]*net.IPNet, error) {
+func parseAllowedCIDRs(values []string, purpose string) ([]*net.IPNet, error) {
 	result := make([]*net.IPNet, 0, len(values))
 	for _, value := range values {
 		_, network, err := net.ParseCIDR(value)
 		if err != nil {
-			return nil, fmt.Errorf("parse allowed console CIDR: %w", err)
+			return nil, fmt.Errorf("parse allowed %s CIDR: %w", purpose, err)
 		}
 		result = append(result, network)
 	}

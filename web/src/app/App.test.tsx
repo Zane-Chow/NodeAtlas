@@ -19,8 +19,8 @@ it('renders the operator navigation for an authenticated administrator', async (
   for (const label of ['总览', '服务器', '服务商', '操作记录', '备份与设置']) {
     expect(screen.getByText(label)).toBeInTheDocument()
   }
-  expect(screen.getByText('阶段一 · 基础控制面板')).toBeInTheDocument()
-  expect(screen.getByText('Mock 核心流程已完成')).toBeInTheDocument()
+  expect(screen.getByText('阶段二 · 真实服务商接入')).toBeInTheDocument()
+  expect(screen.getByText('AWS 与 VirtFusion 已接入')).toBeInTheDocument()
 })
 
 it('navigates to provider connections and unified servers', async () => {
