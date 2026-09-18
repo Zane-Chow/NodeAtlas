@@ -96,8 +96,8 @@
 
 **Files:** README, `docs/console.md`, `docs/backups.md`, compose files and env example.
 
-- [ ] Document target policy, proxy requirements, ticket lifetime, backup key ownership and recovery limits.
-- [ ] Add a dedicated backup volume/directory to direct and Compose deployment examples.
+- [x] Document target policy, proxy requirements, ticket lifetime, backup key ownership and recovery limits.
+- [x] Add a dedicated backup volume/directory to direct and Compose deployment examples.
 - [ ] Run full Go/frontend tests, lint, production build and Docker image build.
 - [ ] Exercise all four Mock console profiles and create/validate/restore a backup on SQLite.
 - [ ] Restore the SQLite-created archive into MySQL and verify record counts and encrypted credentials.

@@ -12,6 +12,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CREDENTIAL_KEYS: ${CREDENTIAL_KEYS:?CREDENTIAL_KEYS is required}
       CREDENTIAL_ACTIVE_KEY_VERSION: ${CREDENTIAL_ACTIVE_KEY_VERSION:-1}
+      BACKUP_DIRECTORY: ${BACKUP_DIRECTORY:-/backups}
+      CONSOLE_ALLOWED_PRIVATE_CIDRS: ${CONSOLE_ALLOWED_PRIVATE_CIDRS:-}
     depends_on:
       mysql:
         condition: service_healthy
@@ -19,6 +21,7 @@ services:
       - "${PANEL_PORT:-8080}:8080"
     volumes:
       - app-data:/data
+      - backup-data:/backups
 
   mysql:
     image: mysql:8.4
@@ -38,4 +41,5 @@ services:
 
 volumes:
   app-data:
+  backup-data:
   mysql-data:

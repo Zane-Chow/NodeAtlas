@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -111,7 +112,14 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	operationHandler := operations.NewHTTPHandler(operationService, operationRepository)
 	consoleRepository := consoleapi.NewSQLRepository(db, dialect)
 	consoleTargets := consoleapi.NewMemoryTargetStore()
-	consolePolicy := consoleapi.NewTargetPolicy(nil, consoleapi.TargetPolicyOptions{AllowMockTransport: true})
+	allowedConsoleCIDRs, err := parseAllowedConsoleCIDRs(cfg.Console.AllowedPrivateCIDRs)
+	if err != nil {
+		return nil, nil, err
+	}
+	consolePolicy := consoleapi.NewTargetPolicy(nil, consoleapi.TargetPolicyOptions{
+		AllowMockTransport:  true,
+		AllowedPrivateCIDRs: allowedConsoleCIDRs,
+	})
 	consoleService := consoleapi.NewService(consoleRepository, inventoryRepository, connectionRepository, auditRepository, credentialCipher, registry, consolePolicy, consoleTargets, consoleapi.ServiceOptions{})
 	consoleHandler := consoleapi.NewHTTPHandler(consoleService)
 	consoleGateway := consoleapi.NewWebSocketGateway(consoleRepository, consoleTargets, auditRepository, consoleapi.GatewayOptions{})
@@ -174,4 +182,16 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 		WebSocket: authHandler.ProtectSession(consoleGateway),
 	})
 	return handler, worker, nil
+}
+
+func parseAllowedConsoleCIDRs(values []string) ([]*net.IPNet, error) {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			return nil, fmt.Errorf("parse allowed console CIDR: %w", err)
+		}
+		result = append(result, network)
+	}
+	return result, nil
 }

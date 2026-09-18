@@ -12,6 +12,7 @@ func setValidCredentialKeys(t *testing.T) {
 	t.Helper()
 	t.Setenv("CREDENTIAL_KEYS", "1:"+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	t.Setenv("CREDENTIAL_ACTIVE_KEY_VERSION", "1")
+	t.Setenv("CONSOLE_ALLOWED_PRIVATE_CIDRS", "")
 }
 
 func TestLoadDefaultsToSQLite(t *testing.T) {
@@ -39,6 +40,34 @@ func TestLoadAcceptsBackupDirectory(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "/var/lib/controlpanel/backups", cfg.Backup.Directory)
+}
+
+func TestLoadAcceptsConsoleAllowedPrivateCIDRs(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("CONSOLE_ALLOWED_PRIVATE_CIDRS", "10.20.0.0/16, fd00::/8")
+
+	cfg, err := Load()
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"10.20.0.0/16", "fd00::/8"}, cfg.Console.AllowedPrivateCIDRs)
+}
+
+func TestLoadRejectsMalformedConsoleAllowedPrivateCIDR(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("CONSOLE_ALLOWED_PRIVATE_CIDRS", "10.20.0.0/not-a-prefix")
+
+	_, err := Load()
+
+	require.ErrorContains(t, err, "CONSOLE_ALLOWED_PRIVATE_CIDRS")
+}
+
+func TestLoadRejectsPublicConsoleAllowedCIDR(t *testing.T) {
+	setValidCredentialKeys(t)
+	t.Setenv("CONSOLE_ALLOWED_PRIVATE_CIDRS", "203.0.113.0/24")
+
+	_, err := Load()
+
+	require.ErrorContains(t, err, "private network")
 }
 
 func TestLoadRejectsPartialBootstrapCredentials(t *testing.T) {

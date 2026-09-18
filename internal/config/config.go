@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -17,6 +18,7 @@ type Config struct {
 	Auth        AuthBootstrapConfig
 	Secrets     SecretConfig
 	Backup      BackupConfig
+	Console     ConsoleConfig
 }
 
 type DatabaseConfig struct {
@@ -42,6 +44,10 @@ type BackupConfig struct {
 	Directory string
 }
 
+type ConsoleConfig struct {
+	AllowedPrivateCIDRs []string
+}
+
 func Load() (Config, error) {
 	environment := envOrDefault("APP_ENV", "development")
 	databaseURL := envOrDefault("DATABASE_URL", "sqlite://data/controlpanel.db")
@@ -56,6 +62,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	credentialKeys, activeKeyVersion, err := loadCredentialKeys()
+	if err != nil {
+		return Config{}, err
+	}
+	allowedPrivateCIDRs, err := loadConsoleAllowedPrivateCIDRs()
 	if err != nil {
 		return Config{}, err
 	}
@@ -92,8 +102,59 @@ func Load() (Config, error) {
 			CredentialKeys:   credentialKeys,
 			ActiveKeyVersion: activeKeyVersion,
 		},
-		Backup: BackupConfig{Directory: envOrDefault("BACKUP_DIRECTORY", "data/backups")},
+		Backup:  BackupConfig{Directory: envOrDefault("BACKUP_DIRECTORY", "data/backups")},
+		Console: ConsoleConfig{AllowedPrivateCIDRs: allowedPrivateCIDRs},
 	}, nil
+}
+
+func loadConsoleAllowedPrivateCIDRs() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv("CONSOLE_ALLOWED_PRIVATE_CIDRS"))
+	if raw == "" {
+		return nil, nil
+	}
+
+	privateRoots := mustPrivateCIDRs()
+	entries := strings.Split(raw, ",")
+	result := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		value := strings.TrimSpace(entry)
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			return nil, fmt.Errorf("CONSOLE_ALLOWED_PRIVATE_CIDRS contains invalid CIDR %q", value)
+		}
+		if !cidrWithinPrivateRoot(network, privateRoots) {
+			return nil, fmt.Errorf("CONSOLE_ALLOWED_PRIVATE_CIDRS entry %q must be a private network", value)
+		}
+		canonical := network.String()
+		if _, duplicate := seen[canonical]; duplicate {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		result = append(result, canonical)
+	}
+	return result, nil
+}
+
+func mustPrivateCIDRs() []*net.IPNet {
+	values := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, _ := net.ParseCIDR(value)
+		result = append(result, network)
+	}
+	return result
+}
+
+func cidrWithinPrivateRoot(candidate *net.IPNet, roots []*net.IPNet) bool {
+	candidatePrefix, candidateBits := candidate.Mask.Size()
+	for _, root := range roots {
+		rootPrefix, rootBits := root.Mask.Size()
+		if candidateBits == rootBits && candidatePrefix >= rootPrefix && root.Contains(candidate.IP) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadCredentialKeys() (map[int][]byte, int, error) {

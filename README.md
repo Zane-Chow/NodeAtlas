@@ -1,6 +1,6 @@
 # Server Control Panel
 
-单用户、多服务商服务器控制面板。当前里程碑已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单，以及安全的开机、关机和重启流程。现阶段使用 Mock 服务商验证完整流程，下一阶段将实现控制台与备份，再接入 AWS 与 VirtFusion。
+单用户、多服务商服务器控制面板。当前里程碑已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份。现阶段使用 Mock 服务商验证完整流程，下一阶段将完成发行验收，再接入 AWS 与 VirtFusion。
 
 ## 当前功能
 
@@ -10,9 +10,10 @@
 - 后台任务持久化、租约执行和失败重试；同步失败不会覆盖上一次成功清单。
 - 根据服务商能力和服务器状态启用开机、关机、重启按钮，所有操作均需二次确认。
 - 电源操作具有幂等保护、单服务器互斥、远端状态复核、操作历史和实时界面更新。
-- VNC/串行控制台、服务商后台回退与加密备份仍在下一里程碑中，当前按钮保持禁用。
+- 根据能力支持面板内嵌控制台、新窗口临时控制台和服务商后台三级回退。
+- 支持创建、下载、校验和恢复应用级加密备份；恢复前自动创建安全快照。
 
-电源操作的状态、重试和反向代理要求详见 [docs/operations.md](docs/operations.md)。
+电源操作、控制台和备份运维要求分别见 [docs/operations.md](docs/operations.md)、[docs/console.md](docs/console.md) 和 [docs/backups.md](docs/backups.md)。
 
 ## 单文件运行
 
@@ -22,6 +23,7 @@
 make build
 export CREDENTIAL_KEYS="1:$(openssl rand -base64 32)"
 export CREDENTIAL_ACTIVE_KEY_VERSION=1
+export BACKUP_DIRECTORY=data/backups
 DATABASE_URL=sqlite://data/controlpanel.db PUBLIC_ORIGIN=http://127.0.0.1:8080 ./dist/controlpanel
 ```
 
@@ -43,7 +45,7 @@ SQLite：
 docker compose -f compose.yaml -f compose.sqlite.yaml up -d --build
 ```
 
-生产环境必须通过 Caddy、Traefik、Nginx 或既有入口代理提供 HTTPS。应用只监听 HTTP，并根据 `PUBLIC_ORIGIN` 执行同源检查。
+生产环境必须通过 Caddy、Traefik、Nginx 或既有入口代理提供 HTTPS，并允许 `/ws/console/` 的 WebSocket 升级以及 `/api/v1/events` 的 SSE 长连接。应用只监听 HTTP，并根据 `PUBLIC_ORIGIN` 执行同源检查。
 
 ## 健康检查
 
@@ -57,11 +59,11 @@ docker compose -f compose.yaml -f compose.sqlite.yaml up -d --build
 - `sqlite://data/controlpanel.db`
 - `mysql://username:password@hostname:3306/database`
 
-SQLite 与 MySQL 是部署时二选一，不会双写。未来跨数据库迁移必须使用应用级加密备份功能，不能复制 SQLite 文件或直接导入 MySQL。
+SQLite 与 MySQL 是部署时二选一，不会双写。跨数据库迁移必须使用应用级加密备份功能，不能复制 SQLite 文件或直接导入 MySQL。
 
 ## Mock 服务商
 
-登录后进入“服务商”页面，创建 Mock 连接并选择服务器数量和控制台能力。连接创建后可执行“测试连接”和“立即同步”；同步任务由后台工作器处理，完成后服务器会出现在“服务器”页面。打开服务器详情即可对符合状态与能力要求的服务器执行电源操作，并在“操作记录”页面查看结果。Mock 凭据仅用于验证加密存储和交互流程，不会访问外部服务。
+登录后进入“服务商”页面，创建 Mock 连接并选择服务器数量和控制台能力。连接创建后可执行“测试连接”和“立即同步”；同步任务由后台工作器处理，完成后服务器会出现在“服务器”页面。打开服务器详情即可执行符合能力要求的电源操作，或演示内嵌、新窗口、仅后台和完全不可用四种控制台组合。Mock 凭据仅用于验证加密存储和交互流程，不会访问外部服务。
 
 `CREDENTIAL_KEYS` 可以用逗号配置多个版本，例如 `1:<旧密钥>,2:<新密钥>`；`CREDENTIAL_ACTIVE_KEY_VERSION` 指定新写入数据使用的版本。轮换期间保留仍被数据库记录引用的旧密钥。
 

@@ -13,12 +13,13 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY --from=web /src/web/dist/ ./internal/webassets/dist/
 ARG VERSION=dev
-RUN mkdir -p /out/data && CGO_ENABLED=0 go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/controlpanel ./cmd/controlpanel
+RUN mkdir -p /out/data /out/backups && CGO_ENABLED=0 go test ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/controlpanel ./cmd/controlpanel
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=backend /out/controlpanel /controlpanel
 COPY --from=backend --chown=65532:65532 /out/data /data
-VOLUME ["/data"]
+COPY --from=backend --chown=65532:65532 /out/backups /backups
+VOLUME ["/data", "/backups"]
 EXPOSE 8080
 ENTRYPOINT ["/controlpanel"]
