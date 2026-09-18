@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ServersPage } from './ServersPage'
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/') })
 
 it('filters the unified server list and opens details', async () => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -38,7 +38,9 @@ it('filters the unified server list and opens details', async () => {
   expect(within(detail).getByRole('button', { name: '开机' })).toBeDisabled()
   expect(within(detail).getByRole('button', { name: '关机' })).toBeEnabled()
   expect(within(detail).getByRole('button', { name: '重启' })).toBeEnabled()
-  expect(within(detail).getByRole('button', { name: '控制台 · 里程碑 4' })).toBeDisabled()
+  expect(within(detail).getByRole('button', { name: '内嵌控制台' })).toBeEnabled()
+  expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toBeEnabled()
+  expect(within(detail).getByRole('button', { name: '服务商后台' })).toBeEnabled()
 })
 
 it('confirms and queues a supported power action', async () => {
@@ -98,4 +100,43 @@ it('shows an empty inventory state', async () => {
     : new Response(JSON.stringify({ servers: [], total: 0 }), { status: 200 }))
   render(<ServersPage />)
   expect(await screen.findByText('还没有同步到服务器')).toBeInTheDocument()
+})
+
+it('creates an embedded one-use console and renders websocket output', async () => {
+  class FakeWebSocket {
+    static instance: FakeWebSocket
+    static OPEN = 1
+    readonly url: string
+    readyState = 0
+    onopen: (() => void) | null = null
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onclose: (() => void) | null = null
+    send = vi.fn()
+    close = vi.fn()
+    constructor(url: string) { this.url = url; FakeWebSocket.instance = this }
+    emitOpen() { this.readyState = FakeWebSocket.OPEN; this.onopen?.() }
+    emitMessage(data: string) { this.onmessage?.(new MessageEvent('message', { data })) }
+  }
+  vi.stubGlobal('WebSocket', FakeWebSocket)
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const url = String(input)
+    if (url.endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-a', name: '实验室 A', provider_type: 'mock', enabled: true }] }), { status: 200 })
+    if (url.endsWith('/console-sessions')) return new Response(JSON.stringify({ session: { session_id: 'session-a', ticket: 'ticket-a', expires_at: '2026-09-18T12:01:00Z' } }), { status: 201 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-a', connection_id: 'connection-a', external_id: 'vm-a', scope: 'zone-a', name: 'console-01',
+      state: 'running', remote_state: 'RUNNING', spec: {}, addresses: [], capabilities: { can_embed_console: { available: true }, can_open_console_window: { available: false, reason: 'unavailable' }, has_provider_portal: { available: true } },
+      last_seen_at: '2026-09-18T12:00:00Z', last_state_checked_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 console-01' }))
+  await userEvent.click(within(screen.getByRole('dialog', { name: '服务器详情' })).getByRole('button', { name: '内嵌控制台' }))
+  const consoleDialog = await screen.findByRole('dialog', { name: 'console-01 控制台' })
+  expect(FakeWebSocket.instance.url).toContain('/ws/console/ticket-a')
+  FakeWebSocket.instance.emitOpen()
+  FakeWebSocket.instance.emitMessage('Server Control Mock Console')
+  expect(await within(consoleDialog).findByText(/Server Control Mock Console/)).toBeInTheDocument()
+  await userEvent.type(within(consoleDialog).getByLabelText('控制台输入'), 'status')
+  await userEvent.click(within(consoleDialog).getByRole('button', { name: '发送' }))
+  expect(FakeWebSocket.instance.send).toHaveBeenCalledWith('status')
 })

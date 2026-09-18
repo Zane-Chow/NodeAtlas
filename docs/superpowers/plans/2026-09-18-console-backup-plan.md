@@ -78,10 +78,10 @@
 
 **Files:** server API/types/detail, new console client/component and tests.
 
-- [ ] Replace the disabled console button with capability-driven options.
-- [ ] Open embedded Mock console in a dialog using WebSocket and show connection state without logging frames.
-- [ ] Open temporary console or provider portal links in a new tab using `noopener,noreferrer`.
-- [ ] Display the exact fallback level and safe error messages.
+- [x] Replace the disabled console button with capability-driven options.
+- [x] Open embedded Mock console in a dialog using WebSocket and show connection state without logging frames.
+- [x] Open temporary console or provider portal links in a new tab using `noopener,noreferrer`.
+- [x] Display each fallback level and safe error messages.
 
 ### Task 7: Backup and Settings React Experience
 
