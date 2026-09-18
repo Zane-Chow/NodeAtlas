@@ -20,11 +20,13 @@ import (
 )
 
 func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
+	temporary := t.TempDir()
 	cfg := config.Config{
 		Environment: "development",
 		HTTP:        config.HTTPConfig{Address: "127.0.0.1:0"},
-		Database:    config.DatabaseConfig{URL: "sqlite://" + filepath.Join(t.TempDir(), "app.db")},
+		Database:    config.DatabaseConfig{URL: "sqlite://" + filepath.Join(temporary, "app.db")},
 		Secrets:     config.SecretConfig{CredentialKeys: map[int][]byte{1: bytes.Repeat([]byte{7}, 32)}, ActiveKeyVersion: 1},
+		Backup:      config.BackupConfig{Directory: filepath.Join(temporary, "backups")},
 	}
 	db, dialect, err := database.Open(context.Background(), cfg.Database)
 	require.NoError(t, err)
@@ -76,10 +78,12 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 }
 
 func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
+	temporary := t.TempDir()
 	cfg := config.Config{
 		Environment: "development", HTTP: config.HTTPConfig{Address: "127.0.0.1:0"},
-		Database: config.DatabaseConfig{URL: "sqlite://" + filepath.Join(t.TempDir(), "power-app.db")},
+		Database: config.DatabaseConfig{URL: "sqlite://" + filepath.Join(temporary, "power-app.db")},
 		Secrets:  config.SecretConfig{CredentialKeys: map[int][]byte{1: bytes.Repeat([]byte{9}, 32)}, ActiveKeyVersion: 1},
+		Backup:   config.BackupConfig{Directory: filepath.Join(temporary, "backups")},
 	}
 	db, dialect, err := database.Open(context.Background(), cfg.Database)
 	require.NoError(t, err)
@@ -167,6 +171,20 @@ func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(banner), "Mock Console")
 	require.NoError(t, consoleConnection.Close(websocket.StatusNormalClosure, "done"))
+
+	createBackup := httptest.NewRecorder()
+	handler.ServeHTTP(createBackup, appRequest(http.MethodPost, "/api/v1/backups", `{"passphrase":"correct horse backup passphrase"}`, cookies))
+	require.Equal(t, http.StatusCreated, createBackup.Code)
+	require.NotContains(t, createBackup.Body.String(), "passphrase")
+	var backupPayload struct {
+		Backup struct {
+			ID string `json:"id"`
+		} `json:"backup"`
+	}
+	require.NoError(t, json.Unmarshal(createBackup.Body.Bytes(), &backupPayload))
+	validateBackup := httptest.NewRecorder()
+	handler.ServeHTTP(validateBackup, appRequest(http.MethodPost, "/api/v1/backups/validate", `{"backup_id":"`+backupPayload.Backup.ID+`","passphrase":"correct horse backup passphrase"}`, cookies))
+	require.Equal(t, http.StatusOK, validateBackup.Code)
 
 	unauthenticatedEvents := httptest.NewRecorder()
 	handler.ServeHTTP(unauthenticatedEvents, httptest.NewRequest(http.MethodGet, "/api/v1/events", nil))

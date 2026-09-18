@@ -12,6 +12,7 @@ import (
 
 	"controlpanel/internal/audit"
 	"controlpanel/internal/auth"
+	"controlpanel/internal/backup"
 	"controlpanel/internal/config"
 	"controlpanel/internal/connections"
 	consoleapi "controlpanel/internal/console"
@@ -114,6 +115,12 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	consoleService := consoleapi.NewService(consoleRepository, inventoryRepository, connectionRepository, auditRepository, credentialCipher, registry, consolePolicy, consoleTargets, consoleapi.ServiceOptions{})
 	consoleHandler := consoleapi.NewHTTPHandler(consoleService)
 	consoleGateway := consoleapi.NewWebSocketGateway(consoleRepository, consoleTargets, auditRepository, consoleapi.GatewayOptions{})
+	backupRepository := backup.NewSQLRepository(db, dialect)
+	backupService, err := backup.NewService(backupRepository, backup.NewSnapshotter(db, dialect, backup.SnapshotOptions{ApplicationVersion: "dev"}), auditRepository, backup.NewSQLActivityChecker(db), backup.ServiceOptions{Directory: cfg.Backup.Directory})
+	if err != nil {
+		return nil, nil, err
+	}
+	backupHandler := backup.NewHTTPHandler(backupService)
 	featureHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		requestPath := chi.RouteContext(request.Context()).RoutePath
 		switch {
@@ -123,6 +130,8 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 			operationHandler.ServeHTTP(response, request)
 		case strings.Contains(requestPath, "/console-"), strings.Contains(requestPath, "/console-sessions"), strings.Contains(requestPath, "/provider-portal"):
 			consoleHandler.ServeHTTP(response, request)
+		case requestPath == "/backups", strings.HasPrefix(requestPath, "/backups/"):
+			backupHandler.ServeHTTP(response, request)
 		case requestPath == "/provider-types", requestPath == "/connections", strings.HasPrefix(requestPath, "/connections/"):
 			connectionHandler.ServeHTTP(response, request)
 		case requestPath == "/servers", strings.HasPrefix(requestPath, "/servers/"):

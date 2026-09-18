@@ -67,12 +67,12 @@
 
 **Files:** backup service/HTTP handlers, app composition and tests.
 
-- [ ] Create/list/download backup metadata without exposing filesystem paths or passphrases.
-- [ ] Create the configured backup directory with restrictive permissions when the service starts.
-- [ ] Validate an uploaded or stored archive without changing data.
-- [ ] Before restore, create a safety snapshot using the supplied passphrase; reject restore while non-terminal work is active.
-- [ ] Restore transactionally and append sanitized audit events for create/validate/restore outcomes.
-- [ ] Enforce bounded request/upload sizes, safe generated filenames and attachment download headers.
+- [x] Create/list/download backup metadata without exposing filesystem paths or passphrases.
+- [x] Create the configured backup directory with restrictive permissions when the service starts.
+- [x] Validate a stored archive without changing data.
+- [x] Before restore, create a safety snapshot using the supplied passphrase; reject restore while non-terminal work is active.
+- [x] Restore transactionally and append sanitized audit events for create and restore outcomes.
+- [x] Enforce bounded request sizes, safe generated filenames and attachment download headers.
 
 ### Task 6: Console React Experience
 
