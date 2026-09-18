@@ -62,9 +62,9 @@ export function AppShell({ user, onLogout }: { user: AuthUser; onLogout(): Promi
 
 function Dashboard() {
   return <section className="content-grid">
-    <article className="welcome-card"><p className="eyebrow">里程碑 3 · 安全电源控制</p><h2>统一控制服务器电源状态</h2><p>电源操作、幂等任务、状态验证、操作记录与实时更新已经接通。</p><div className="progress-track"><span style={{ width: '60%' }} /></div></article>
-    <article className="status-card"><span className="status-icon">PV</span><div><small>Provider 核心</small><strong>Mock 已接入</strong><p>支持多个独立连接</p></div></article>
-    <article className="status-card"><span className="status-icon">JOB</span><div><small>同步任务</small><strong>持久化运行</strong><p>租约、重试与错误分类</p></div></article>
-    <article className="next-card"><span className="step-number">04</span><div><small>下一里程碑</small><h3>控制台与双数据库备份</h3><p>支持内嵌、新窗口与服务商后台回退的控制台入口。</p></div></article>
+    <article className="welcome-card"><p className="eyebrow">阶段一 · 基础控制面板</p><h2>统一管理多个服务商的服务器</h2><p>连接同步、电源操作、控制台回退、操作审计与加密备份均已接通。</p><div className="progress-track"><span style={{ width: '100%' }} /></div></article>
+    <article className="status-card"><span className="status-icon">PV</span><div><small>Provider 核心</small><strong>Mock 核心流程已完成</strong><p>支持多个独立连接与四种控制台组合</p></div></article>
+    <article className="status-card"><span className="status-icon">BK</span><div><small>数据安全</small><strong>SQLite / MySQL 可迁移</strong><p>加密归档、校验、恢复与安全快照</p></div></article>
+    <article className="next-card"><span className="step-number">02</span><div><small>下一阶段</small><h3>AWS 与 VirtFusion</h3><p>在现有 Provider 接口上接入真实服务商 API。</p></div></article>
   </section>
 }
