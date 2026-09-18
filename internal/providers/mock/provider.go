@@ -154,8 +154,7 @@ func (provider *Provider) RebootServer(ctx context.Context, ref providers.Server
 }
 
 func (provider *Provider) OpenConsole(_ context.Context, ref providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
-	server, err := provider.GetServer(context.Background(), ref)
-	if err != nil {
+	if _, err := provider.GetServer(context.Background(), ref); err != nil {
 		return providers.ConsoleTarget{}, err
 	}
 	allowed := mode == providers.ConsoleEmbedded && provider.settings.ConsoleProfile == "embedded"
@@ -163,13 +162,12 @@ func (provider *Provider) OpenConsole(_ context.Context, ref providers.ServerRef
 	if !allowed {
 		return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorUnsupported, Message: "mock console mode unavailable"}
 	}
-	scheme := "https"
-	host := "mock.invalid"
+	scheme := "mock+page"
+	host := "console"
 	if mode == providers.ConsoleEmbedded {
 		scheme = "mock+ws"
-		host = "console"
 	}
-	target, _ := url.Parse(scheme + "://" + host + "/console/" + url.PathEscape(provider.connectionID) + "/" + url.PathEscape(server.ExternalID))
+	target, _ := url.Parse(scheme + "://" + host)
 	return providers.ConsoleTarget{Mode: mode, URL: target}, nil
 }
 
@@ -177,11 +175,10 @@ func (provider *Provider) ProviderPortalURL(_ context.Context, ref providers.Ser
 	if provider.settings.ConsoleProfile == "none" {
 		return nil, &providers.Error{Code: providers.ErrorUnsupported, Message: "mock portal unavailable"}
 	}
-	server, err := provider.GetServer(context.Background(), ref)
-	if err != nil {
+	if _, err := provider.GetServer(context.Background(), ref); err != nil {
 		return nil, err
 	}
-	return url.Parse("https://mock.invalid/connections/" + url.PathEscape(provider.connectionID) + "/servers/" + url.PathEscape(server.ExternalID))
+	return url.Parse("mock+page://portal")
 }
 
 func (provider *Provider) changeState(ctx context.Context, ref providers.ServerRef, state providers.ServerState) (providers.ActionReceipt, error) {

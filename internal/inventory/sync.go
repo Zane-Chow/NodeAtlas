@@ -88,7 +88,7 @@ func (syncer *Syncer) SyncConnection(ctx context.Context, connectionID string) e
 			return syncer.recordFailure(ctx, connection.ID, &providers.Error{Code: providers.ErrorProvider, Message: "provider inventory exceeds 10000 servers"})
 		}
 		for _, remote := range page.Servers {
-			server, err := syncer.normalizeServer(ctx, provider, connection.ID, remote, completedAt)
+			server, err := syncer.normalizeServer(ctx, provider, connection.ID, connection.ProviderType, remote, completedAt)
 			if err != nil {
 				return syncer.recordFailure(ctx, connection.ID, err)
 			}
@@ -102,7 +102,7 @@ func (syncer *Syncer) SyncConnection(ctx context.Context, connectionID string) e
 	return syncer.recordFailure(ctx, connection.ID, &providers.Error{Code: providers.ErrorProvider, Message: "provider pagination exceeds 1000 pages"})
 }
 
-func (syncer *Syncer) normalizeServer(ctx context.Context, provider providers.Provider, connectionID string, remote providers.RemoteServer, at time.Time) (Server, error) {
+func (syncer *Syncer) normalizeServer(ctx context.Context, provider providers.Provider, connectionID, providerType string, remote providers.RemoteServer, at time.Time) (Server, error) {
 	if remote.ExternalID == "" || remote.Name == "" {
 		return Server{}, errors.New("provider returned an invalid server")
 	}
@@ -120,10 +120,10 @@ func (syncer *Syncer) normalizeServer(ctx context.Context, provider providers.Pr
 		if err != nil {
 			return Server{}, err
 		}
-		if err := validatePortalURL(target); err != nil {
+		value, err := normalizePortalURL(providerType, target)
+		if err != nil {
 			return Server{}, err
 		}
-		value := target.String()
 		portalURL = &value
 	}
 	return Server{
@@ -154,11 +154,14 @@ func classifyProviderError(err error) (connections.HealthStatus, string, string)
 	return status, string(providerError.Code), providerError.Message
 }
 
-func validatePortalURL(target *url.URL) error {
-	if target == nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
-		return errors.New("provider returned an invalid portal URL")
+func normalizePortalURL(providerType string, target *url.URL) (string, error) {
+	if providerType == "mock" && target != nil && target.Scheme == "mock+page" && target.Hostname() == "portal" && target.Port() == "" && target.User == nil && target.Fragment == "" && target.RawQuery == "" && (target.Path == "" || target.Path == "/") {
+		return "/api/v1/mock-pages/portal", nil
 	}
-	return nil
+	if target == nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
+		return "", errors.New("provider returned an invalid portal URL")
+	}
+	return target.String(), nil
 }
 
 func validState(state State) bool {

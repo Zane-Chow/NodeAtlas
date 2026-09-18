@@ -54,6 +54,29 @@ func TestServiceReturnsOnlyValidatedWindowAndPortalURLs(t *testing.T) {
 	require.Equal(t, "https://portal.example.test/servers/server-a", portal.URL)
 }
 
+func TestTrustedMockPageOnlyMapsExactInternalMarkers(t *testing.T) {
+	valid := mustProviderURL("mock+page://console")
+	path, ok := trustedMockPage("mock", valid)
+	require.True(t, ok)
+	require.Equal(t, "/api/v1/mock-pages/console", path)
+
+	for name, candidate := range map[string]struct {
+		providerType string
+		target       *url.URL
+	}{
+		"non mock provider": {providerType: "aws", target: valid},
+		"unexpected host":   {providerType: "mock", target: mustProviderURL("mock+page://attacker")},
+		"userinfo":          {providerType: "mock", target: mustProviderURL("mock+page://user@console")},
+		"query":             {providerType: "mock", target: mustProviderURL("mock+page://console?token=secret")},
+		"external scheme":   {providerType: "mock", target: mustProviderURL("https://console")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, ok := trustedMockPage(candidate.providerType, candidate.target)
+			require.False(t, ok)
+		})
+	}
+}
+
 type serviceFixture struct {
 	service    *Service
 	repository *memorySessionRepository

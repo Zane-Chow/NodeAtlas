@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"controlpanel/internal/audit"
@@ -116,7 +117,7 @@ func (service *Service) CreateEmbedded(ctx context.Context, serverID, requestID,
 	if !capabilities.CanEmbedConsole.Available {
 		return SessionTicket{}, ErrCapabilityUnavailable
 	}
-	provider, err := service.provider(ctx, server.ConnectionID)
+	provider, _, err := service.provider(ctx, server.ConnectionID)
 	if err != nil {
 		return SessionTicket{}, err
 	}
@@ -158,7 +159,7 @@ func (service *Service) ProviderPortal(ctx context.Context, serverID, requestID,
 	if !capabilities.HasProviderPortal.Available {
 		return ExternalTarget{}, ErrCapabilityUnavailable
 	}
-	provider, err := service.provider(ctx, server.ConnectionID)
+	provider, providerType, err := service.provider(ctx, server.ConnectionID)
 	if err != nil {
 		return ExternalTarget{}, err
 	}
@@ -168,6 +169,12 @@ func (service *Service) ProviderPortal(ctx context.Context, serverID, requestID,
 			return ExternalTarget{}, err
 		}
 		return ExternalTarget{}, ErrTargetUnavailable
+	}
+	if mockPath, ok := trustedMockPage(providerType, target); ok {
+		if err := service.appendAudit(ctx, server.ID, "provider_portal_opened", requestID, sourceIP, map[string]string{"mode": "portal"}); err != nil {
+			return ExternalTarget{}, err
+		}
+		return ExternalTarget{URL: mockPath}, nil
 	}
 	if err := service.policy.ValidateExternal(ctx, target); err != nil {
 		return ExternalTarget{}, err
@@ -186,7 +193,7 @@ func (service *Service) externalTarget(ctx context.Context, serverID string, mod
 	if mode != providers.ConsoleWindow || !capabilities.CanOpenConsoleWindow.Available {
 		return ExternalTarget{}, ErrCapabilityUnavailable
 	}
-	provider, err := service.provider(ctx, server.ConnectionID)
+	provider, providerType, err := service.provider(ctx, server.ConnectionID)
 	if err != nil {
 		return ExternalTarget{}, err
 	}
@@ -196,6 +203,12 @@ func (service *Service) externalTarget(ctx context.Context, serverID string, mod
 			return ExternalTarget{}, err
 		}
 		return ExternalTarget{}, ErrTargetUnavailable
+	}
+	if mockPath, ok := trustedMockPage(providerType, target.URL); ok {
+		if err := service.appendAudit(ctx, server.ID, "console_window_opened", requestID, sourceIP, map[string]string{"mode": "window"}); err != nil {
+			return ExternalTarget{}, err
+		}
+		return ExternalTarget{URL: mockPath}, nil
 	}
 	if err := service.policy.ValidateExternal(ctx, target.URL); err != nil {
 		return ExternalTarget{}, err
@@ -218,17 +231,32 @@ func (service *Service) serverCapabilities(ctx context.Context, serverID string)
 	return server, capabilities, nil
 }
 
-func (service *Service) provider(ctx context.Context, connectionID string) (providers.Provider, error) {
+func (service *Service) provider(ctx context.Context, connectionID string) (providers.Provider, string, error) {
 	connection, stored, err := service.connections.FindByID(ctx, connectionID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	plaintext, err := service.cipher.Decrypt(connection.ID, connection.ProviderType, secrets.Envelope{Ciphertext: stored.Ciphertext, Nonce: stored.Nonce, KeyVersion: stored.KeyVersion})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer clear(plaintext)
-	return service.registry.Create(providers.ConnectionConfig{ID: connection.ID, Type: connection.ProviderType, Endpoint: connection.Endpoint, Settings: connection.Settings, Credentials: plaintext})
+	provider, err := service.registry.Create(providers.ConnectionConfig{ID: connection.ID, Type: connection.ProviderType, Endpoint: connection.Endpoint, Settings: connection.Settings, Credentials: plaintext})
+	return provider, connection.ProviderType, err
+}
+
+func trustedMockPage(providerType string, target *url.URL) (string, bool) {
+	if providerType != "mock" || target == nil || target.Scheme != "mock+page" || target.User != nil || target.Fragment != "" || target.RawQuery != "" || (target.Path != "" && target.Path != "/") || target.Port() != "" {
+		return "", false
+	}
+	switch target.Hostname() {
+	case "console":
+		return "/api/v1/mock-pages/console", true
+	case "portal":
+		return "/api/v1/mock-pages/portal", true
+	default:
+		return "", false
+	}
 }
 
 func (service *Service) appendAudit(ctx context.Context, targetID, eventType, requestID, sourceIP string, metadata map[string]string) error {

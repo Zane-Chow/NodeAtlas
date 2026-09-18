@@ -136,7 +136,7 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 			eventHandler.ServeHTTP(response, request)
 		case requestPath == "/operations", strings.HasPrefix(requestPath, "/operations/"), strings.Contains(requestPath, "/actions/"):
 			operationHandler.ServeHTTP(response, request)
-		case strings.Contains(requestPath, "/console-"), strings.Contains(requestPath, "/console-sessions"), strings.Contains(requestPath, "/provider-portal"):
+		case strings.Contains(requestPath, "/console-"), strings.Contains(requestPath, "/console-sessions"), strings.Contains(requestPath, "/provider-portal"), strings.Contains(requestPath, "/mock-pages/"):
 			consoleHandler.ServeHTTP(response, request)
 		case requestPath == "/backups", strings.HasPrefix(requestPath, "/backups/"):
 			backupHandler.ServeHTTP(response, request)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -29,7 +30,28 @@ func NewHTTPHandler(service API) http.Handler {
 	router.Post("/servers/{serverID}/console-sessions", handler.createSession)
 	router.Post("/servers/{serverID}/console-window", handler.openWindow)
 	router.Get("/servers/{serverID}/provider-portal", handler.providerPortal)
+	router.Get("/mock-pages/{page}", handler.mockPage)
 	return router
+}
+
+func (handler *HTTPHandler) mockPage(response http.ResponseWriter, request *http.Request) {
+	var title, message string
+	switch chi.URLParam(request, "page") {
+	case "console":
+		title = "Mock Console"
+		message = "这是新窗口控制台的本地模拟页面，不会连接外部服务。"
+	case "portal":
+		title = "Mock Provider Portal"
+		message = "这是服务商后台回退入口的本地模拟页面。"
+	default:
+		http.NotFound(response, request)
+		return
+	}
+	response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-store")
+	response.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	response.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.WriteString(response, "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>"+title+"</title><main><h1>"+title+"</h1><p>"+message+"</p></main></html>")
 }
 
 func (handler *HTTPHandler) options(response http.ResponseWriter, request *http.Request) {

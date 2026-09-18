@@ -30,6 +30,8 @@ func TestSyncerImportsMockProviderInventory(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, servers, 3)
 	require.Equal(t, "connection-a-server-001", servers[0].ExternalID)
+	require.NotNil(t, servers[0].PortalURL)
+	require.Equal(t, "/api/v1/mock-pages/portal", *servers[0].PortalURL)
 	stored, _, err := fixture.connections.FindByID(context.Background(), "connection-a")
 	require.NoError(t, err)
 	require.Equal(t, connections.HealthHealthy, stored.HealthStatus)
