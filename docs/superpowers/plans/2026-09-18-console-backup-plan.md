@@ -87,10 +87,10 @@
 
 **Files:** new backup page/API/types/tests, app navigation and CSS.
 
-- [ ] Enable “备份与设置”, list backups and create one with a non-retained passphrase.
-- [ ] Download, validate and restore with explicit destructive confirmation.
-- [ ] Clear passphrase fields after every request and never store them in browser persistence.
-- [ ] Add responsive states for empty, running, success and failure results.
+- [x] Enable “备份与设置”, list backups and create one with a non-retained passphrase.
+- [x] Download, validate and restore with explicit destructive confirmation.
+- [x] Clear passphrase fields after every request and never store them in browser persistence.
+- [x] Add responsive states for empty, running, success and failure results.
 
 ### Task 8: Documentation and Milestone Verification
 

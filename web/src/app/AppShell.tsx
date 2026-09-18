@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react'
 import type { AuthUser } from '../auth/useAuth'
+import { BackupsPage } from '../backups/BackupsPage'
 import { ConnectionsPage } from '../connections/ConnectionsPage'
 import { OperationsPage } from '../operations/OperationsPage'
 import { ServersPage } from '../servers/ServersPage'
 
-type Page = 'dashboard' | 'servers' | 'connections' | 'operations'
+type Page = 'dashboard' | 'servers' | 'connections' | 'operations' | 'settings'
 const navigation: Array<{ label: string; page?: Page; path?: string }> = [
   { label: '总览', page: 'dashboard', path: '/' },
   { label: '服务器', page: 'servers', path: '/servers' },
   { label: '服务商', page: 'connections', path: '/connections' },
   { label: '操作记录', page: 'operations', path: '/operations' },
-  { label: '备份与设置' },
+  { label: '备份与设置', page: 'settings', path: '/settings' },
 ]
-const pageTitles: Record<Page, string> = { dashboard: '运行总览', servers: '统一服务器清单', connections: '服务商连接', operations: '操作记录' }
+const pageTitles: Record<Page, string> = { dashboard: '运行总览', servers: '统一服务器清单', connections: '服务商连接', operations: '操作记录', settings: '备份与设置' }
 
 function pageFromPath(path: string): Page {
   if (path.startsWith('/servers')) return 'servers'
   if (path.startsWith('/connections')) return 'connections'
   if (path.startsWith('/operations')) return 'operations'
+  if (path.startsWith('/settings')) return 'settings'
   return 'dashboard'
 }
 
@@ -53,6 +55,7 @@ export function AppShell({ user, onLogout }: { user: AuthUser; onLogout(): Promi
       {page === 'servers' && <ServersPage />}
       {page === 'connections' && <ConnectionsPage />}
       {page === 'operations' && <OperationsPage />}
+      {page === 'settings' && <BackupsPage />}
     </main>
   </div>
 }
