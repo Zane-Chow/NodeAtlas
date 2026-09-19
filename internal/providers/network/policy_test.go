@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,6 +23,16 @@ func (resolver staticResolver) LookupIP(_ context.Context, _ string, host string
 type rebindingResolver struct {
 	mutex     sync.Mutex
 	addresses [][]net.IP
+}
+
+type countingResolver struct {
+	addresses []net.IP
+	calls     atomic.Int32
+}
+
+func (resolver *countingResolver) LookupIP(context.Context, string, string) ([]net.IP, error) {
+	resolver.calls.Add(1)
+	return resolver.addresses, nil
 }
 
 func (resolver *rebindingResolver) LookupIP(context.Context, string, string) ([]net.IP, error) {
@@ -131,6 +143,36 @@ func TestHTTPClientRejectsCrossOriginAndDowngradeRedirects(t *testing.T) {
 		request := &http.Request{URL: mustURL(t, raw)}
 		require.Error(t, client.CheckRedirect(request, nil))
 	}
+}
+
+func TestHTTPClientRequiresHTTPSForInitialRequestUnlessExplicitlyAllowed(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		response.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	serverURL := mustURL(t, server.URL)
+	origin := mustURL(t, "http://fixture.example.test:"+serverURL.Port())
+	resolver := &countingResolver{addresses: []net.IP{net.ParseIP("127.0.0.1")}}
+	policy := NewPolicy(resolver, PolicyOptions{AllowLoopback: true})
+
+	client := NewHTTPClient(policy, origin, HTTPOptions{})
+	response, err := client.Get(origin.String())
+	if response != nil {
+		response.Body.Close()
+	}
+	require.Error(t, err)
+	require.Zero(t, resolver.calls.Load(), "HTTP rejection must happen before resolution or dialing")
+	require.Zero(t, requests.Load())
+
+	client = NewHTTPClient(policy, origin, HTTPOptions{AllowHTTP: true})
+	response, err = client.Get(origin.String())
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, int32(1), resolver.calls.Load())
+	require.Equal(t, int32(1), requests.Load())
 }
 
 func TestHTTPClientRejectsDNSRebindingAtDial(t *testing.T) {

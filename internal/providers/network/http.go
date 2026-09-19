@@ -17,6 +17,25 @@ type HTTPOptions struct {
 	RootCAs   *x509.CertPool
 }
 
+type validatingTransport struct {
+	transport *http.Transport
+	allowHTTP bool
+}
+
+func (transport validatingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request == nil || request.URL == nil {
+		return nil, errors.New("provider request URL is required")
+	}
+	if request.URL.Scheme != "https" && !(transport.allowHTTP && request.URL.Scheme == "http") {
+		return nil, errors.New("provider request must use HTTPS")
+	}
+	return transport.transport.RoundTrip(request)
+}
+
+func (transport validatingTransport) CloseIdleConnections() {
+	transport.transport.CloseIdleConnections()
+}
+
 func NewHTTPClient(policy Policy, origin *url.URL, options HTTPOptions) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
@@ -56,7 +75,7 @@ func NewHTTPClient(policy Policy, origin *url.URL, options HTTPOptions) *http.Cl
 		timeout = 30 * time.Second
 	}
 	return &http.Client{
-		Transport: transport,
+		Transport: validatingTransport{transport: transport, allowHTTP: options.AllowHTTP},
 		Timeout:   timeout,
 		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
 			if request.URL.Scheme != "https" && !(options.AllowHTTP && request.URL.Scheme == "http") {
