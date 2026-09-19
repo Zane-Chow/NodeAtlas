@@ -3,7 +3,6 @@ package virtfusion
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,13 +16,10 @@ import (
 	"time"
 
 	"controlpanel/internal/providers"
+	providernetwork "controlpanel/internal/providers/network"
 )
 
 const maxResponseBytes = 4 << 20
-
-type Resolver interface {
-	LookupIP(context.Context, string, string) ([]net.IP, error)
-}
 
 type FactoryOptions struct {
 	AllowedPrivateCIDRs []*net.IPNet
@@ -31,7 +27,7 @@ type FactoryOptions struct {
 
 type factoryOptions struct {
 	allowedPrivateCIDRs []*net.IPNet
-	resolver            Resolver
+	resolver            providernetwork.Resolver
 	allowHTTP           bool
 	allowLoopback       bool
 }
@@ -155,13 +151,18 @@ func (factory *Factory) Create(config providers.ConnectionConfig) (providers.Pro
 	if err != nil {
 		return nil, err
 	}
-	policy := endpointPolicy{resolver: factory.options.resolver, allowedPrivateCIDRs: factory.options.allowedPrivateCIDRs, allowLoopback: factory.options.allowLoopback}
+	policy := providernetwork.NewPolicy(factory.options.resolver, providernetwork.PolicyOptions{
+		AllowedPrivateCIDRs: factory.options.allowedPrivateCIDRs,
+		AllowLoopback:       factory.options.allowLoopback,
+	})
 	validationContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := policy.validate(validationContext, portalURL); err != nil {
+	if err := policy.Validate(validationContext, portalURL); err != nil {
 		return nil, errors.New("VirtFusion endpoint is not allowed")
 	}
-	client := newHTTPClient(policy, portalURL, factory.options.allowHTTP)
+	client := providernetwork.NewHTTPClient(policy, portalURL, providernetwork.HTTPOptions{
+		AllowHTTP: factory.options.allowHTTP,
+	})
 	return &Provider{apiBase: apiBase, portalURL: portalURL, token: strings.TrimSpace(secret.Token), pageSize: configuration.PageSize, client: client}, nil
 }
 
@@ -288,7 +289,9 @@ func (provider *Provider) resolveVNC(raw string) (*url.URL, error) {
 	if target.Scheme == provider.portalURL.Scheme {
 		target.Scheme = expectedScheme
 	}
-	if target.Scheme != expectedScheme || !sameHost(target, provider.portalURL) || strings.TrimSpace(target.Path) == "" {
+	vncOrigin := *provider.portalURL
+	vncOrigin.Scheme = expectedScheme
+	if target.Scheme != expectedScheme || !providernetwork.SameOrigin(target, &vncOrigin) || strings.TrimSpace(target.Path) == "" {
 		return nil, &providers.Error{Code: providers.ErrorProvider, Message: "VirtFusion returned an untrusted VNC endpoint"}
 	}
 	return target, nil
@@ -324,12 +327,12 @@ func normalizeServer(data serverData) providers.RemoteServer {
 	encodedAddresses, _ := json.Marshal(addresses)
 	vncAvailable := data.VNC != nil && !data.Suspended && !data.BuildFailed && data.CommissionStatus >= 3
 	capabilities := providers.Capabilities{
-		CanStart:          capability(state == providers.StateStopped, "server must be stopped"),
-		CanStop:           capability(state == providers.StateRunning, "server must be running"),
-		CanReboot:         capability(state == providers.StateRunning, "server must be running"),
-		CanEmbedConsole:   capability(vncAvailable, "VirtFusion VNC is unavailable for this server"),
+		CanStart:             capability(state == providers.StateStopped, "server must be stopped"),
+		CanStop:              capability(state == providers.StateRunning, "server must be running"),
+		CanReboot:            capability(state == providers.StateRunning, "server must be running"),
+		CanEmbedConsole:      capability(vncAvailable, "VirtFusion VNC is unavailable for this server"),
 		CanOpenConsoleWindow: capability(vncAvailable, "VirtFusion VNC is unavailable for this server"),
-		HasProviderPortal: providers.Capability{Available: true},
+		HasProviderPortal:    providers.Capability{Available: true},
 	}
 	return providers.RemoteServer{ExternalID: id, Scope: data.HypervisorID.String(), Name: name, State: state, RemoteState: remoteState, Spec: spec, Addresses: encodedAddresses, Capabilities: capabilities}
 }
@@ -500,119 +503,6 @@ func decodeStrict(raw []byte, target any) error {
 		return errors.New("JSON must contain one value")
 	}
 	return nil
-}
-
-type endpointPolicy struct {
-	resolver            Resolver
-	allowedPrivateCIDRs []*net.IPNet
-	allowLoopback       bool
-}
-
-func (policy endpointPolicy) validate(ctx context.Context, target *url.URL) error {
-	if target == nil || target.Hostname() == "" {
-		return errors.New("missing endpoint host")
-	}
-	addresses, err := policy.resolve(ctx, target.Hostname())
-	if err != nil || len(addresses) == 0 {
-		return errors.New("resolve endpoint")
-	}
-	for _, address := range addresses {
-		if !policy.addressAllowed(address) {
-			return errors.New("endpoint address is not allowed")
-		}
-	}
-	return nil
-}
-
-func (policy endpointPolicy) resolve(ctx context.Context, host string) ([]net.IP, error) {
-	if literal := net.ParseIP(host); literal != nil {
-		return []net.IP{literal}, nil
-	}
-	return policy.resolver.LookupIP(ctx, "ip", host)
-}
-
-func (policy endpointPolicy) addressAllowed(address net.IP) bool {
-	if address == nil || address.IsUnspecified() || address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() || address.IsMulticast() {
-		return false
-	}
-	if address.IsLoopback() {
-		return policy.allowLoopback
-	}
-	if !address.IsPrivate() {
-		return true
-	}
-	for _, network := range policy.allowedPrivateCIDRs {
-		if network != nil && network.Contains(address) {
-			return true
-		}
-	}
-	return false
-}
-
-func newHTTPClient(policy endpointPolicy, origin *url.URL, allowHTTP bool) *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, errors.New("invalid VirtFusion network address")
-			}
-			addresses, err := policy.resolve(ctx, host)
-			if err != nil || len(addresses) == 0 {
-				return nil, errors.New("resolve VirtFusion endpoint")
-			}
-			for _, resolved := range addresses {
-				if !policy.addressAllowed(resolved) {
-					return nil, errors.New("VirtFusion endpoint address changed to a blocked network")
-				}
-			}
-			var lastErr error
-			for _, resolved := range addresses {
-				connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(resolved.String(), port))
-				if dialErr == nil {
-					return connection, nil
-				}
-				lastErr = dialErr
-			}
-			return nil, lastErr
-		},
-		ForceAttemptHTTP2:   true,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
-		MaxIdleConns:        20,
-		IdleConnTimeout:     60 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-	}
-	return &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
-		CheckRedirect: func(request *http.Request, _ []*http.Request) error {
-			if request.URL.Scheme != "https" && !(allowHTTP && request.URL.Scheme == "http") {
-				return errors.New("VirtFusion redirect changed protocol")
-			}
-			if !sameHost(request.URL, origin) {
-				return errors.New("VirtFusion cross-origin redirect rejected")
-			}
-			return policy.validate(request.Context(), request.URL)
-		},
-	}
-}
-
-func sameHost(left, right *url.URL) bool {
-	return strings.EqualFold(left.Hostname(), right.Hostname()) && effectivePort(left) == effectivePort(right)
-}
-
-func effectivePort(target *url.URL) string {
-	if target.Port() != "" {
-		return target.Port()
-	}
-	switch target.Scheme {
-	case "https", "wss":
-		return "443"
-	case "http", "ws":
-		return "80"
-	default:
-		return ""
-	}
 }
 
 var _ providers.Factory = (*Factory)(nil)

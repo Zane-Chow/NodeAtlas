@@ -3,6 +3,7 @@ package virtfusion
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -117,6 +118,27 @@ func TestFactoryRejectsUnsafeEndpointsAndDoesNotEchoToken(t *testing.T) {
 	require.NotContains(t, err.Error(), "do-not-echo")
 }
 
+func TestFactoryUsesSharedNetworkPolicyWithoutDisclosingResolvedAddresses(t *testing.T) {
+	const token = "do-not-echo"
+	configuration := providers.ConnectionConfig{
+		ID: "vf", Endpoint: "https://private.example.test",
+		Settings: json.RawMessage(`{}`), Credentials: json.RawMessage(`{"token":"` + token + `"}`),
+	}
+	resolver := providerStaticResolver{"private.example.test": {net.ParseIP("10.20.30.40")}}
+
+	_, err := newFactory(factoryOptions{resolver: resolver}).Create(configuration)
+	require.EqualError(t, err, "VirtFusion endpoint is not allowed")
+	require.NotContains(t, err.Error(), "10.20.30.40")
+	require.NotContains(t, err.Error(), token)
+
+	_, allowedPrivateNetwork, err := net.ParseCIDR("10.20.0.0/16")
+	require.NoError(t, err)
+	_, err = newFactory(factoryOptions{
+		resolver: resolver, allowedPrivateCIDRs: []*net.IPNet{allowedPrivateNetwork},
+	}).Create(configuration)
+	require.NoError(t, err)
+}
+
 func TestProviderClassifiesHTTPFailuresWithoutLeakingBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		writeFixtureJSON(t, response, http.StatusUnauthorized, map[string]any{"error": "body-secret"})
@@ -169,4 +191,10 @@ func writeFixtureJSON(t *testing.T, response http.ResponseWriter, status int, va
 	response.Header().Set("Content-Type", "application/json")
 	response.WriteHeader(status)
 	require.NoError(t, json.NewEncoder(response).Encode(value))
+}
+
+type providerStaticResolver map[string][]net.IP
+
+func (resolver providerStaticResolver) LookupIP(_ context.Context, _ string, host string) ([]net.IP, error) {
+	return resolver[host], nil
 }
