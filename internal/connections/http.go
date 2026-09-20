@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -30,13 +31,30 @@ func NewHTTPHandler(service *Service) http.Handler {
 }
 
 func (handler *HTTPHandler) providerTypes(response http.ResponseWriter, _ *http.Request) {
-	types := make([]map[string]string, 0)
-	for _, providerType := range handler.service.ProviderTypes() {
+	providerTypes := handler.service.ProviderTypes()
+	order := map[string]int{"aws": 0, "gcp": 1, "mock": 2, "virtualizor": 3, "virtfusion": 4}
+	sort.SliceStable(providerTypes, func(i, j int) bool {
+		left, leftKnown := order[providerTypes[i]]
+		right, rightKnown := order[providerTypes[j]]
+		if leftKnown != rightKnown {
+			return leftKnown
+		}
+		if leftKnown {
+			return left < right
+		}
+		return providerTypes[i] < providerTypes[j]
+	})
+	types := make([]map[string]string, 0, len(providerTypes))
+	for _, providerType := range providerTypes {
 		name := strings.ToUpper(providerType[:1]) + providerType[1:] + " Provider"
 		if providerType == "mock" {
 			name = "Mock Provider"
 		} else if providerType == "aws" {
 			name = "AWS EC2"
+		} else if providerType == "gcp" {
+			name = "Google Cloud Compute Engine"
+		} else if providerType == "virtualizor" {
+			name = "Virtualizor"
 		} else if providerType == "virtfusion" {
 			name = "VirtFusion"
 		}

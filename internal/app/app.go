@@ -25,8 +25,10 @@ import (
 	"controlpanel/internal/operations"
 	"controlpanel/internal/providers"
 	provideraws "controlpanel/internal/providers/aws"
+	providergcp "controlpanel/internal/providers/gcp"
 	providermock "controlpanel/internal/providers/mock"
 	providervirtfusion "controlpanel/internal/providers/virtfusion"
+	providervirtualizor "controlpanel/internal/providers/virtualizor"
 	"controlpanel/internal/secrets"
 	"controlpanel/internal/webassets"
 	"github.com/go-chi/chi/v5"
@@ -104,6 +106,14 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	}
 	allowedProviderCIDRs, err := parseAllowedCIDRs(cfg.Providers.AllowedPrivateCIDRs, "provider")
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := registry.Register("gcp", providergcp.NewFactory()); err != nil {
+		return nil, nil, err
+	}
+	if err := registry.Register("virtualizor", providervirtualizor.NewFactory(
+		providervirtualizor.FactoryOptions{AllowedPrivateCIDRs: allowedProviderCIDRs},
+	)); err != nil {
 		return nil, nil, err
 	}
 	if err := registry.Register("virtfusion", providervirtfusion.NewFactory(providervirtfusion.FactoryOptions{AllowedPrivateCIDRs: allowedProviderCIDRs})); err != nil {

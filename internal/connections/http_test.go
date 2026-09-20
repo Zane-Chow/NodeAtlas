@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	provideraws "controlpanel/internal/providers/aws"
+	providergcp "controlpanel/internal/providers/gcp"
+	providervirtfusion "controlpanel/internal/providers/virtfusion"
+	providervirtualizor "controlpanel/internal/providers/virtualizor"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,6 +40,10 @@ func TestHTTPCreateListAndGetConnectionWithoutCredentials(t *testing.T) {
 
 func TestHTTPConnectionActionsAndProviderTypes(t *testing.T) {
 	service, _, _, queue := newServiceFixture(t)
+	require.NoError(t, service.registry.Register("aws", provideraws.NewFactory()))
+	require.NoError(t, service.registry.Register("gcp", providergcp.NewFactory()))
+	require.NoError(t, service.registry.Register("virtualizor", providervirtualizor.NewFactory(providervirtualizor.FactoryOptions{})))
+	require.NoError(t, service.registry.Register("virtfusion", providervirtfusion.NewFactory(providervirtfusion.FactoryOptions{})))
 	_, err := service.Create(t.Context(), CreateInput{
 		Name: "Lab", ProviderType: "mock", Enabled: true,
 		Settings: json.RawMessage(`{"server_count":1}`), Credentials: json.RawMessage(`{"token":"valid"}`),
@@ -47,7 +55,15 @@ func TestHTTPConnectionActionsAndProviderTypes(t *testing.T) {
 	providerTypes := httptest.NewRecorder()
 	handler.ServeHTTP(providerTypes, httptest.NewRequest(http.MethodGet, "/provider-types", nil))
 	require.Equal(t, http.StatusOK, providerTypes.Code)
-	require.JSONEq(t, `{"provider_types":[{"id":"mock","name":"Mock Provider"}]}`, providerTypes.Body.String())
+	require.JSONEq(t, `{
+		"provider_types": [
+			{"id":"aws","name":"AWS EC2"},
+			{"id":"gcp","name":"Google Cloud Compute Engine"},
+			{"id":"mock","name":"Mock Provider"},
+			{"id":"virtualizor","name":"Virtualizor"},
+			{"id":"virtfusion","name":"VirtFusion"}
+		]
+	}`, providerTypes.Body.String())
 
 	tested := httptest.NewRecorder()
 	handler.ServeHTTP(tested, httptest.NewRequest(http.MethodPost, "/connections/connection-id/test", bytes.NewReader([]byte(`{}`))))

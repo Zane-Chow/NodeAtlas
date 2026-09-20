@@ -34,6 +34,11 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	require.NoError(t, database.Migrate(context.Background(), db, dialect))
 	handler, _, err := compose(db, dialect, cfg)
 	require.NoError(t, err)
+	unauthenticatedProviderTypes := httptest.NewRecorder()
+	handler.ServeHTTP(unauthenticatedProviderTypes, httptest.NewRequest(http.MethodGet, "/api/v1/provider-types", nil))
+	require.Equal(t, http.StatusUnauthorized, unauthenticatedProviderTypes.Code)
+	require.NotContains(t, unauthenticatedProviderTypes.Body.String(), "gcp")
+	require.NotContains(t, unauthenticatedProviderTypes.Body.String(), "virtualizor")
 
 	setup := httptest.NewRequest(http.MethodPost, "/api/v1/setup/initialize", bytes.NewBufferString(`{
 		"username":"admin","password":"correct horse battery staple"
@@ -44,6 +49,23 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	setupResponse := httptest.NewRecorder()
 	handler.ServeHTTP(setupResponse, setup)
 	require.Equal(t, http.StatusCreated, setupResponse.Code)
+
+	providerTypes := httptest.NewRequest(http.MethodGet, "/api/v1/provider-types", nil)
+	for _, cookie := range setupResponse.Result().Cookies() {
+		providerTypes.AddCookie(cookie)
+	}
+	providerTypesResponse := httptest.NewRecorder()
+	handler.ServeHTTP(providerTypesResponse, providerTypes)
+	require.Equal(t, http.StatusOK, providerTypesResponse.Code)
+	require.JSONEq(t, `{
+		"provider_types": [
+			{"id":"aws","name":"AWS EC2"},
+			{"id":"gcp","name":"Google Cloud Compute Engine"},
+			{"id":"mock","name":"Mock Provider"},
+			{"id":"virtualizor","name":"Virtualizor"},
+			{"id":"virtfusion","name":"VirtFusion"}
+		]
+	}`, providerTypesResponse.Body.String())
 
 	create := httptest.NewRequest(http.MethodPost, "/api/v1/connections", bytes.NewBufferString(`{
 		"name":"Lab A","provider_type":"mock","enabled":true,
