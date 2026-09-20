@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 var ErrTargetRejected = errors.New("console target rejected by security policy")
@@ -24,9 +26,14 @@ func (resolver netResolver) LookupIP(ctx context.Context, host string) ([]net.IP
 	return addresses, nil
 }
 
+type TCPDialer interface {
+	DialContext(context.Context, string, string) (net.Conn, error)
+}
+
 type TargetPolicyOptions struct {
 	AllowedPrivateCIDRs []*net.IPNet
 	AllowMockTransport  bool
+	Dialer              TCPDialer
 }
 
 type TargetPolicy struct {
@@ -38,10 +45,19 @@ func NewTargetPolicy(resolver Resolver, options TargetPolicyOptions) *TargetPoli
 	if resolver == nil {
 		resolver = netResolver{resolver: net.DefaultResolver}
 	}
+	if options.Dialer == nil {
+		options.Dialer = &net.Dialer{Timeout: 10 * time.Second}
+	}
 	return &TargetPolicy{resolver: resolver, options: options}
 }
 
 func (policy *TargetPolicy) ValidateEmbedded(ctx context.Context, target *url.URL) error {
+	if target != nil && target.Scheme == "vnc+tcp" {
+		if err := validateRawTarget(target); err != nil {
+			return err
+		}
+		return policy.validateNetworkTarget(ctx, target)
+	}
 	if target != nil && target.Scheme == "mock+ws" && policy.options.AllowMockTransport && target.Hostname() == "console" {
 		return validateURLShape(target)
 	}
@@ -62,23 +78,70 @@ func (policy *TargetPolicy) validateNetworkTarget(ctx context.Context, target *u
 	if err := validateURLShape(target); err != nil {
 		return err
 	}
-	host := target.Hostname()
+	_, err := policy.resolveAllowed(ctx, target.Hostname())
+	return err
+}
+
+func (policy *TargetPolicy) resolveAllowed(ctx context.Context, host string) ([]net.IP, error) {
 	addresses := make([]net.IP, 0, 1)
 	if literal := net.ParseIP(host); literal != nil {
 		addresses = append(addresses, literal)
 	} else {
 		resolved, err := policy.resolver.LookupIP(ctx, host)
 		if err != nil || len(resolved) == 0 {
-			return ErrTargetRejected
+			return nil, ErrTargetRejected
 		}
 		addresses = append(addresses, resolved...)
 	}
 	for _, address := range addresses {
 		if !policy.addressAllowed(address) {
+			return nil, ErrTargetRejected
+		}
+	}
+	return addresses, nil
+}
+
+func validateRawTarget(target *url.URL) error {
+	if validateURLShape(target) != nil || target.Scheme != "vnc+tcp" || target.Path != "" || target.RawPath != "" || target.RawQuery != "" || target.ForceQuery || target.Opaque != "" || target.RawFragment != "" {
+		return ErrTargetRejected
+	}
+	host, port, err := net.SplitHostPort(target.Host)
+	if err != nil || strings.TrimSpace(host) == "" || port == "" {
+		return ErrTargetRejected
+	}
+	for _, digit := range port {
+		if digit < '0' || digit > '9' {
 			return ErrTargetRejected
 		}
 	}
+	value, err := strconv.Atoi(port)
+	if err != nil || value < 1 || value > 65535 {
+		return ErrTargetRejected
+	}
 	return nil
+}
+
+// DialTCP rechecks every DNS answer and dials only approved literal addresses.
+func (policy *TargetPolicy) DialTCP(ctx context.Context, target *url.URL) (net.Conn, error) {
+	if err := validateRawTarget(target); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	addresses, err := policy.resolveAllowed(ctx, target.Hostname())
+	if err != nil {
+		return nil, err
+	}
+	for _, address := range addresses {
+		if ctx.Err() != nil {
+			break
+		}
+		connection, err := policy.options.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(address.String(), target.Port()))
+		if err == nil {
+			return connection, nil
+		}
+	}
+	return nil, ErrTargetUnavailable
 }
 
 func validateURLShape(target *url.URL) error {

@@ -135,7 +135,7 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 	})
 	consoleService := consoleapi.NewService(consoleRepository, inventoryRepository, connectionRepository, auditRepository, credentialCipher, registry, consolePolicy, consoleTargets, consoleapi.ServiceOptions{})
 	consoleHandler := consoleapi.NewHTTPHandler(consoleService)
-	consoleGateway := consoleapi.NewWebSocketGateway(consoleRepository, consoleTargets, auditRepository, consoleapi.GatewayOptions{})
+	consoleGateway := consoleapi.NewWebSocketGateway(consoleRepository, consoleTargets, auditRepository, consoleapi.GatewayOptions{TargetPolicy: consolePolicy})
 	backupRepository := backup.NewSQLRepository(db, dialect)
 	backupService, err := backup.NewService(backupRepository, backup.NewSnapshotter(db, dialect, backup.SnapshotOptions{ApplicationVersion: "dev"}), auditRepository, backup.NewSQLActivityChecker(db), backup.ServiceOptions{Directory: cfg.Backup.Directory})
 	if err != nil {

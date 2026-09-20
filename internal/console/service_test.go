@@ -56,6 +56,48 @@ func TestServiceReturnsOnlyValidatedWindowAndPortalURLs(t *testing.T) {
 	require.Equal(t, "https://portal.example.test/servers/server-a", portal.URL)
 }
 
+func TestServiceRawTCPRequiresExactVirtualizorProvider(t *testing.T) {
+	for _, providerType := range []string{"virtualizor", "virtfusion", "mock", "Virtualizor", "virtualizor-other"} {
+		t.Run(providerType, func(t *testing.T) {
+			fixture := newServiceFixture(t)
+			connectionRepository := fixture.service.connections.(*memoryConnections)
+			connectionRepository.connection.ProviderType = providerType
+			envelope, err := fixture.service.cipher.Encrypt("connection-a", providerType, []byte(`{}`))
+			require.NoError(t, err)
+			connectionRepository.credentials = connections.CredentialRecord{Ciphertext: envelope.Ciphertext, Nonce: envelope.Nonce, KeyVersion: envelope.KeyVersion}
+			require.NoError(t, fixture.service.registry.Register(providerType, rawConsoleFactory{}))
+			created, err := fixture.service.CreateEmbedded(context.Background(), "server-a", "request-a", "192.0.2.10")
+			if providerType == "virtualizor" {
+				require.NoError(t, err)
+				require.Equal(t, "rfb", created.Protocol)
+				require.NotEmpty(t, created.Ticket)
+				target, ok := fixture.targets.Take(created.SessionID)
+				require.True(t, ok)
+				require.Equal(t, "vnc+tcp://console.example.test:5951", target.String())
+			} else {
+				require.ErrorIs(t, err, ErrTargetRejected)
+				require.Empty(t, created.Ticket)
+				require.Empty(t, fixture.repository.created.ID)
+				_, ok := fixture.targets.Take("session-a")
+				require.False(t, ok)
+				require.Empty(t, fixture.audit.entries)
+			}
+		})
+	}
+}
+
+type rawConsoleFactory struct{}
+
+func (rawConsoleFactory) Create(providers.ConnectionConfig) (providers.Provider, error) {
+	return rawConsoleProvider{}, nil
+}
+
+type rawConsoleProvider struct{ fakeConsoleProvider }
+
+func (rawConsoleProvider) OpenConsole(_ context.Context, _ providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
+	return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", URL: mustProviderURL("vnc+tcp://console.example.test:5951")}, nil
+}
+
 func TestTrustedMockPageOnlyMapsExactInternalMarkers(t *testing.T) {
 	valid := mustProviderURL("mock+page://console")
 	path, ok := trustedMockPage("mock", valid)

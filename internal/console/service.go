@@ -123,7 +123,7 @@ func (service *Service) CreateEmbedded(ctx context.Context, serverID, requestID,
 	if !capabilities.CanEmbedConsole.Available {
 		return SessionTicket{}, ErrCapabilityUnavailable
 	}
-	provider, _, err := service.provider(ctx, server.ConnectionID)
+	provider, providerType, err := service.provider(ctx, server.ConnectionID)
 	if err != nil {
 		return SessionTicket{}, err
 	}
@@ -133,6 +133,10 @@ func (service *Service) CreateEmbedded(ctx context.Context, serverID, requestID,
 			return SessionTicket{}, err
 		}
 		return SessionTicket{}, ErrTargetUnavailable
+	}
+	// Raw TCP is trusted only for the stored Virtualizor connection identity.
+	if target.URL.Scheme == "vnc+tcp" && providerType != "virtualizor" {
+		return SessionTicket{}, ErrTargetRejected
 	}
 	if err := service.policy.ValidateEmbedded(ctx, target.URL); err != nil {
 		return SessionTicket{}, err

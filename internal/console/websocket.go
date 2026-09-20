@@ -1,9 +1,12 @@
 package console
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -19,6 +22,7 @@ type GatewayOptions struct {
 	IdleTimeout     time.Duration
 	AbsoluteTimeout time.Duration
 	NewAuditID      func() string
+	TargetPolicy    *TargetPolicy
 }
 
 type WebSocketGateway struct {
@@ -78,6 +82,9 @@ func (gateway *WebSocketGateway) open(response http.ResponseWriter, request *htt
 }
 
 func (gateway *WebSocketGateway) proxy(ctx context.Context, downstream *websocket.Conn, target *url.URL) Result {
+	if target.Scheme == "vnc+tcp" {
+		return gateway.runRawVNC(ctx, downstream, target)
+	}
 	if target.Scheme == "mock+ws" {
 		return gateway.runMock(ctx, downstream)
 	}
@@ -97,6 +104,73 @@ func (gateway *WebSocketGateway) proxy(ctx context.Context, downstream *websocke
 		return ResultCompleted
 	}
 	return ResultFailed
+}
+
+func (gateway *WebSocketGateway) runRawVNC(ctx context.Context, downstream *websocket.Conn, target *url.URL) Result {
+	if gateway.options.TargetPolicy == nil {
+		return ResultFailed
+	}
+	upstream, err := gateway.options.TargetPolicy.DialTCP(ctx, target)
+	if err != nil {
+		return ResultFailed
+	}
+	proxyContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer upstream.Close()
+	stop := context.AfterFunc(proxyContext, func() { _ = upstream.Close() })
+	defer stop()
+	results := make(chan error, 2)
+	go func() { results <- gateway.copyTCPToWebSocket(proxyContext, downstream, upstream) }()
+	go func() { results <- gateway.copyWebSocketToTCP(proxyContext, upstream, downstream) }()
+	err = <-results
+	cancel()
+	_ = upstream.Close()
+	<-results
+	if websocket.CloseStatus(err) == websocket.StatusNormalClosure || websocket.CloseStatus(err) == websocket.StatusGoingAway {
+		return ResultCompleted
+	}
+	return ResultFailed
+}
+
+func (gateway *WebSocketGateway) copyTCPToWebSocket(ctx context.Context, destination *websocket.Conn, source net.Conn) error {
+	buffer := make([]byte, 32*1024)
+	for {
+		if err := source.SetReadDeadline(time.Now().Add(gateway.options.IdleTimeout)); err != nil {
+			return err
+		}
+		count, readErr := source.Read(buffer)
+		if count > 0 {
+			writeContext, cancel := context.WithTimeout(ctx, gateway.options.IdleTimeout)
+			err := destination.Write(writeContext, websocket.MessageBinary, buffer[:count])
+			cancel()
+			if err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+}
+
+func (gateway *WebSocketGateway) copyWebSocketToTCP(ctx context.Context, destination net.Conn, source *websocket.Conn) error {
+	for {
+		readContext, cancel := context.WithTimeout(ctx, gateway.options.IdleTimeout)
+		messageType, data, err := source.Read(readContext)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if messageType != websocket.MessageBinary {
+			return ErrTargetRejected
+		}
+		if err := destination.SetWriteDeadline(time.Now().Add(gateway.options.IdleTimeout)); err != nil {
+			return err
+		}
+		if _, err := io.Copy(destination, bytes.NewReader(data)); err != nil {
+			return err
+		}
+	}
 }
 
 func (gateway *WebSocketGateway) runMock(ctx context.Context, connection *websocket.Conn) Result {
