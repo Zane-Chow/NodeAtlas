@@ -1,6 +1,6 @@
 # Server Control Panel
 
-单用户、多服务商服务器控制面板。当前版本已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份，并已接入 Mock、AWS EC2 与 VirtFusion。
+单用户、多服务商服务器控制面板。当前版本已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份，并已接入 Mock、AWS EC2、Google Cloud Compute Engine、VirtFusion 与 Virtualizor。
 
 ## 当前功能
 
@@ -67,9 +67,11 @@ SQLite 与 MySQL 是部署时二选一，不会双写。跨数据库迁移必须
 
 `CREDENTIAL_KEYS` 可以用逗号配置多个版本，例如 `1:<旧密钥>,2:<新密钥>`；`CREDENTIAL_ACTIVE_KEY_VERSION` 指定新写入数据使用的版本。轮换期间保留仍被数据库记录引用的旧密钥。
 
-## AWS 与 VirtFusion
+## 服务商接入
 
 AWS 连接使用一个静态 Access Key、Secret Access Key、可选 Session Token 和显式区域列表；不会读取宿主机环境变量、共享凭据文件或实例角色。VirtFusion 连接使用面板 HTTPS 地址和 Bearer Token，支持 API v1 清单、电源操作及 VirtFusion 6.1+ VNC。自托管面板若解析到私网地址，必须用 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 显式放行所需的最小网段。
+
+第三阶段新增 Google Cloud Compute Engine 与 Virtualizor。GCP 每个连接使用一份完整的服务账号 JSON 和显式项目 ID，支持跨区域清单、开机、关机、硬重置及 Google Cloud 官方资源页回退。Virtualizor 使用客户侧 Enduser API 的 API Key/API Password，支持清单、电源操作，以及通过本面板一次性 WebSocket 票据代理的内嵌或新窗口 VNC。详细权限、凭据保护、HTTPS 与私网放行要求见 [docs/providers.md](docs/providers.md)。
 
 ## 测试
 
