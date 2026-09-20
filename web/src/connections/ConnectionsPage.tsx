@@ -93,6 +93,11 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
   const [virtFusionEndpoint, setVirtFusionEndpoint] = useState('')
   const [virtFusionToken, setVirtFusionToken] = useState('')
   const [virtFusionPageSize, setVirtFusionPageSize] = useState('200')
+  const [gcpProjectID, setGCPProjectID] = useState('')
+  const [gcpServiceAccountJSON, setGCPServiceAccountJSON] = useState('')
+  const [virtualizorEndpoint, setVirtualizorEndpoint] = useState('')
+  const [virtualizorAPIKey, setVirtualizorAPIKey] = useState('')
+  const [virtualizorAPIPassword, setVirtualizorAPIPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
@@ -102,9 +107,22 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
         await onSubmit({ name, provider_type: 'aws', endpoint: '', enabled: true,
           settings: { regions: regions.split(',').map((region) => region.trim()).filter(Boolean) },
           credentials: { access_key_id: accessKeyID, secret_access_key: secretAccessKey, ...(sessionToken.trim() ? { session_token: sessionToken } : {}) } })
+      } else if (providerType === 'gcp') {
+        let serviceAccount: unknown
+        try { serviceAccount = JSON.parse(gcpServiceAccountJSON) }
+        catch { setError('Service Account JSON 格式无效'); return }
+        if (typeof serviceAccount !== 'object' || serviceAccount === null || Array.isArray(serviceAccount)) {
+          setError('Service Account JSON 格式无效')
+          return
+        }
+        await onSubmit({ name, provider_type: 'gcp', endpoint: '', enabled: true,
+          settings: { project_id: gcpProjectID }, credentials: { service_account_json: serviceAccount } })
       } else if (providerType === 'virtfusion') {
         await onSubmit({ name, provider_type: 'virtfusion', endpoint: virtFusionEndpoint.trim(), enabled: true,
           settings: { page_size: Number(virtFusionPageSize) }, credentials: { token: virtFusionToken } })
+      } else if (providerType === 'virtualizor') {
+        await onSubmit({ name, provider_type: 'virtualizor', endpoint: virtualizorEndpoint.trim(), enabled: true,
+          settings: {}, credentials: { api_key: virtualizorAPIKey, api_password: virtualizorAPIPassword } })
       } else {
         await onSubmit({ name, provider_type: 'mock', endpoint: '', enabled: true,
           settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
@@ -121,10 +139,18 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       <label htmlFor="aws-access-key">Access Key ID</label><input id="aws-access-key" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} required autoComplete="off" />
       <label htmlFor="aws-secret-key">Secret Access Key</label><input id="aws-secret-key" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} required autoComplete="new-password" />
       <label htmlFor="aws-session-token">Session Token（可选）</label><input id="aws-session-token" type="password" value={sessionToken} onChange={(event) => setSessionToken(event.target.value)} autoComplete="new-password" />
+    </> : providerType === 'gcp' ? <>
+      <label htmlFor="gcp-project-id">GCP Project ID</label><input id="gcp-project-id" value={gcpProjectID} onChange={(event) => setGCPProjectID(event.target.value)} required />
+      <label htmlFor="gcp-service-account">Service Account JSON</label><textarea id="gcp-service-account" value={gcpServiceAccountJSON} onChange={(event) => setGCPServiceAccountJSON(event.target.value)} required autoComplete="new-password" />
     </> : providerType === 'virtfusion' ? <>
       <label htmlFor="virtfusion-endpoint">VirtFusion 面板地址</label><input id="virtfusion-endpoint" type="url" value={virtFusionEndpoint} onChange={(event) => setVirtFusionEndpoint(event.target.value)} placeholder="https://panel.example.com" required />
       <label htmlFor="virtfusion-page-size">每页服务器数</label><input id="virtfusion-page-size" type="number" min="1" max="200" value={virtFusionPageSize} onChange={(event) => setVirtFusionPageSize(event.target.value)} required />
       <label htmlFor="virtfusion-token">API Bearer Token</label><input id="virtfusion-token" type="password" value={virtFusionToken} onChange={(event) => setVirtFusionToken(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
+    </> : providerType === 'virtualizor' ? <>
+      <label htmlFor="virtualizor-endpoint">Virtualizor 面板地址</label><input id="virtualizor-endpoint" type="url" value={virtualizorEndpoint} onChange={(event) => setVirtualizorEndpoint(event.target.value)} placeholder="https://panel.example.com:4083" required />
+      <label htmlFor="virtualizor-api-key">Virtualizor API Key</label><input id="virtualizor-api-key" type="password" value={virtualizorAPIKey} onChange={(event) => setVirtualizorAPIKey(event.target.value)} required autoComplete="new-password" />
+      <label htmlFor="virtualizor-api-password">Virtualizor API Password</label><input id="virtualizor-api-password" type="password" value={virtualizorAPIPassword} onChange={(event) => setVirtualizorAPIPassword(event.target.value)} required autoComplete="new-password" />
       <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
     </> : <>
       <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />

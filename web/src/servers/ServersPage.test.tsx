@@ -140,3 +140,84 @@ it('creates an embedded one-use console and renders websocket output', async () 
   await userEvent.click(within(consoleDialog).getByRole('button', { name: '发送' }))
   expect(FakeWebSocket.instance.send).toHaveBeenCalledWith('status')
 })
+
+it('warns that GCP reboot performs a hard reset', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    if (String(input).endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-gcp', name: '生产 GCP', provider_type: 'gcp', enabled: true }] }), { status: 200 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-gcp', connection_id: 'connection-gcp', external_id: 'instance-a', scope: 'asia-east1-a', name: 'gcp-01',
+      state: 'running', remote_state: 'RUNNING', spec: {}, addresses: [], capabilities: { can_reboot: { available: true } },
+      last_seen_at: '2026-09-18T12:00:00Z', last_state_checked_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 gcp-01' }))
+  await userEvent.click(within(screen.getByRole('dialog', { name: '服务器详情' })).getByRole('button', { name: '重启' }))
+
+  expect(within(screen.getByRole('dialog', { name: '确认重启' })).getByText('Google Compute Engine 将执行硬重置，效果类似立即重启电源，不会等待操作系统正常关机。')).toBeInTheDocument()
+})
+
+it('opens a Virtualizor VNC session in the same-origin popout', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  const session = {
+    session_id: 'virtualizor-session', ticket: 'one-use-ticket', expires_at: '2026-09-18T12:01:00Z',
+    protocol: 'rfb', credentials: { password: 'temporary-vnc-password' },
+  }
+  const popup = { postMessage: vi.fn(), close: vi.fn() } as unknown as Window
+  const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    calls.push({ url, init })
+    if (url.endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-virtualizor', name: 'Virtualizor', provider_type: 'virtualizor', enabled: true }] }), { status: 200 })
+    if (url.endsWith('/console-sessions')) return new Response(JSON.stringify({ session }), { status: 201 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-virtualizor', connection_id: 'connection-virtualizor', external_id: '101', scope: 'node-a', name: 'virtualizor-01',
+      state: 'running', remote_state: '1', spec: {}, addresses: [], capabilities: { can_open_console_window: { available: true }, has_provider_portal: { available: true } },
+      last_seen_at: '2026-09-18T12:00:00Z', last_state_checked_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 virtualizor-01' }))
+  await userEvent.click(within(screen.getByRole('dialog', { name: '服务器详情' })).getByRole('button', { name: '新窗口控制台' }))
+  expect(open).toHaveBeenCalledWith('/console-popout', '_blank')
+  window.dispatchEvent(new MessageEvent('message', {
+    origin: window.location.origin, source: popup, data: { type: 'server-control:console-ready' },
+  }))
+
+  await waitFor(() => expect(calls.some(({ url, init }) => url.endsWith('/servers/server-virtualizor/console-sessions') && init?.method === 'POST')).toBe(true))
+  await waitFor(() => expect(popup.postMessage).toHaveBeenCalledWith({
+    type: 'server-control:console-session', serverName: 'virtualizor-01', session,
+  }, window.location.origin))
+  const posted = vi.mocked(popup.postMessage).mock.calls[0][0]
+  expect(JSON.stringify(posted)).not.toContain('upstream')
+  expect(JSON.stringify(posted)).not.toContain('"ip"')
+  expect(JSON.stringify(posted)).not.toContain('"port"')
+  expect(JSON.stringify(posted)).not.toContain('api_key')
+  expect(JSON.stringify(posted)).not.toContain('api_password')
+})
+
+it('keeps the Virtualizor provider portal available when both VNC modes are unavailable', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    if (String(input).endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-virtualizor', name: 'Virtualizor', provider_type: 'virtualizor', enabled: true }] }), { status: 200 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-virtualizor', connection_id: 'connection-virtualizor', external_id: '102', scope: 'node-a', name: 'virtualizor-fallback',
+      state: 'running', remote_state: '1', spec: {}, addresses: [], capabilities: {
+        can_embed_console: { available: false, reason: 'Virtualizor VNC is unavailable for this server' },
+        can_open_console_window: { available: false, reason: 'Virtualizor VNC is unavailable for this server' },
+        has_provider_portal: { available: true },
+      },
+      last_seen_at: '2026-09-18T12:00:00Z', last_state_checked_at: '2026-09-18T12:00:00Z', created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 virtualizor-fallback' }))
+  const detail = screen.getByRole('dialog', { name: '服务器详情' })
+  expect(within(detail).getByRole('button', { name: '内嵌控制台' })).toBeDisabled()
+  expect(within(detail).getByRole('button', { name: '内嵌控制台' })).toHaveAttribute('title', 'Virtualizor VNC is unavailable for this server')
+  expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toBeDisabled()
+  expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toHaveAttribute('title', 'Virtualizor VNC is unavailable for this server')
+  expect(within(detail).getByRole('button', { name: '服务商后台' })).toBeEnabled()
+})

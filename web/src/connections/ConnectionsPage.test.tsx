@@ -107,6 +107,114 @@ it('creates a VirtFusion connection with a write-only bearer token', async () =>
   expect(screen.queryByText('write-only-vf-token')).not.toBeInTheDocument()
 })
 
+it('creates a GCP connection with a parsed write-only service account', async () => {
+  const user = userEvent.setup()
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'gcp', name: 'Google Compute Engine' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'gcp-a', name: '生产 GCP', provider_type: 'gcp', endpoint: '', settings: { project_id: 'example-project' },
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.type(screen.getByLabelText('连接名称'), '生产 GCP')
+  await userEvent.type(screen.getByLabelText('GCP Project ID'), 'example-project')
+  await user.click(screen.getByLabelText('Service Account JSON'))
+  await user.paste(JSON.stringify({
+    type: 'service_account',
+    client_email: 'panel@example-project.iam.gserviceaccount.com',
+    private_key: 'write-only-private-key',
+    token_uri: 'https://oauth2.googleapis.com/token',
+  }))
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toMatchObject({
+    name: '生产 GCP',
+    provider_type: 'gcp',
+    endpoint: '',
+    settings: { project_id: 'example-project' },
+    credentials: { service_account_json: {
+      type: 'service_account',
+      client_email: 'panel@example-project.iam.gserviceaccount.com',
+      private_key: 'write-only-private-key',
+      token_uri: 'https://oauth2.googleapis.com/token',
+    } },
+  }))
+  expect(screen.queryByRole('form', { name: '添加服务商' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Service Account JSON')).not.toBeInTheDocument()
+  expect(screen.queryByText('write-only-private-key')).not.toBeInTheDocument()
+})
+
+it('keeps the GCP form open and does not submit malformed service account JSON', async () => {
+  const user = userEvent.setup()
+  let postCount = 0
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'gcp', name: 'Google Compute Engine' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') postCount += 1
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.type(screen.getByLabelText('连接名称'), '无效 GCP')
+  await userEvent.type(screen.getByLabelText('GCP Project ID'), 'example-project')
+  await user.click(screen.getByLabelText('Service Account JSON'))
+  await user.paste('{invalid')
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('Service Account JSON 格式无效')
+  expect(screen.getByRole('form', { name: '添加服务商' })).toBeInTheDocument()
+  expect(postCount).toBe(0)
+})
+
+it('creates a Virtualizor connection with write-only API credentials', async () => {
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'virtualizor', name: 'Virtualizor' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'virtualizor-a', name: 'Virtualizor 主节点', provider_type: 'virtualizor', endpoint: 'https://panel.example.test:4083', settings: {},
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.type(screen.getByLabelText('连接名称'), 'Virtualizor 主节点')
+  await userEvent.type(screen.getByLabelText('Virtualizor 面板地址'), 'https://panel.example.test:4083')
+  await userEvent.type(screen.getByLabelText('Virtualizor API Key'), 'write-only-api-key')
+  await userEvent.type(screen.getByLabelText('Virtualizor API Password'), 'write-only-api-password')
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toMatchObject({
+    name: 'Virtualizor 主节点', provider_type: 'virtualizor', endpoint: 'https://panel.example.test:4083',
+    settings: {}, credentials: { api_key: 'write-only-api-key', api_password: 'write-only-api-password' },
+  }))
+  expect(screen.queryByRole('form', { name: '添加服务商' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Virtualizor API Key')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Virtualizor API Password')).not.toBeInTheDocument()
+  expect(screen.queryByText('write-only-api-key')).not.toBeInTheDocument()
+  expect(screen.queryByText('write-only-api-password')).not.toBeInTheDocument()
+})
+
 it('tests and synchronizes a connection', async () => {
   const calls: string[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

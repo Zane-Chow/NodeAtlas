@@ -13,6 +13,10 @@ import type { Server } from './types'
 const stateLabels: Record<string, string> = { running: '运行中', stopped: '已关机', pending: '启动中', stopping: '关机中', rebooting: '重启中', error: '错误', unknown: '未知' }
 const actionLabels: Record<PowerAction, string> = { start: '开机', stop: '关机', reboot: '重启' }
 
+function usesLocalVNCWindow(providerType: string | undefined) {
+  return providerType === 'virtfusion' || providerType === 'virtualizor'
+}
+
 export function ServersPage() {
   const [servers, setServers] = useState<Server[]>([])
   const [connections, setConnections] = useState<ProviderConnection[]>([])
@@ -98,7 +102,7 @@ export function ServersPage() {
       }
       const providerType = connectionByID.get(selected.connection_id)?.provider_type
       const opened = mode === 'window'
-        ? providerType === 'virtfusion'
+        ? usesLocalVNCWindow(providerType)
           ? await openEmbeddedConsoleWindow(selected.id, selected.name)
           : await openConsoleWindow(selected.id)
         : await openProviderPortal(selected.id)
@@ -121,6 +125,7 @@ export function ServersPage() {
     {selected && confirmation && <ConfirmationDialog
       action={confirmation}
       server={selected}
+      providerType={connectionByID.get(selected.connection_id)?.provider_type}
       submitting={submitting}
       onCancel={() => setConfirmation(null)}
       onConfirm={() => void confirmAction()}
@@ -149,13 +154,14 @@ function ServerDetail({ server, connection, onClose, onAction, onConsole }: { se
   </aside></div>
 }
 
-function ConfirmationDialog({ action, server, submitting, onCancel, onConfirm }: { action: PowerAction; server: Server; submitting: boolean; onCancel(): void; onConfirm(): void }) {
+function ConfirmationDialog({ action, server, providerType, submitting, onCancel, onConfirm }: { action: PowerAction; server: Server; providerType?: string; submitting: boolean; onCancel(): void; onConfirm(): void }) {
   const label = actionLabels[action]
   return <div className="modal-backdrop power-confirmation" onClick={onCancel}>
     <section className="modal-card" role="dialog" aria-modal="true" aria-label={`确认${label}`} onClick={(event) => event.stopPropagation()}>
       <p className="eyebrow">Power operation</p>
       <h3>确认{label}</h3>
       <p>将对服务器 <strong>{server.name}</strong> 执行{label}操作。提交后可在操作记录中查看进度。</p>
+      {action === 'reboot' && providerType === 'gcp' && <p>Google Compute Engine 将执行硬重置，效果类似立即重启电源，不会等待操作系统正常关机。</p>}
       <div className="modal-actions"><button disabled={submitting} onClick={onCancel}>取消</button><button className="primary-button compact" disabled={submitting} onClick={onConfirm}>{submitting ? '正在提交…' : `确认${label}`}</button></div>
     </section>
   </div>

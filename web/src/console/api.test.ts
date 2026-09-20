@@ -34,4 +34,11 @@ it('hands an RFB session to a same-origin popout without putting secrets in its 
   expect(popup.postMessage).toHaveBeenCalledWith(expect.objectContaining({
     type: 'server-control:console-session', serverName: 'VF node',
   }), window.location.origin)
+  expect(popup.postMessage).toHaveBeenCalledWith({
+    type: 'server-control:console-session', serverName: 'VF node', session: {
+      session_id: 'session-a', ticket: 'one-use-ticket', expires_at: '2026-09-18T12:01:00Z',
+      protocol: 'rfb', credentials: { password: 'temporary-password' },
+    },
+  }, window.location.origin)
+  expect(Object.keys(vi.mocked(popup.postMessage).mock.calls[0][0] as object)).toEqual(['type', 'serverName', 'session'])
 })
