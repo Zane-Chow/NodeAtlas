@@ -147,20 +147,19 @@ func (value *flexBool) UnmarshalJSON(raw []byte) error {
 }
 
 type serverData struct {
-	ID            flexInt64   `json:"vpsid"`
-	Hostname      flexString  `json:"hostname"`
-	Virt          flexString  `json:"virt"`
-	Status        flexInt64   `json:"status"`
-	Suspended     flexBool    `json:"suspended"`
-	VNC           flexBool    `json:"vnc"`
-	Cores         flexInt64   `json:"cores"`
-	RAM           flexInt64   `json:"ram"`
-	Space         flexInt64   `json:"space"`
-	Bandwidth     flexInt64   `json:"bandwidth"`
-	ServerName    flexString  `json:"server_name"`
-	ServerID      flexString  `json:"serid"`
-	IPs           ipAddresses `json:"ips"`
-	EnableConsole *flexBool   `json:"enable_console"`
+	ID         flexInt64   `json:"vpsid"`
+	Hostname   flexString  `json:"hostname"`
+	Virt       flexString  `json:"virt"`
+	Status     flexInt64   `json:"status"`
+	Suspended  flexBool    `json:"suspended"`
+	VNC        flexBool    `json:"vnc"`
+	Cores      flexInt64   `json:"cores"`
+	RAM        flexInt64   `json:"ram"`
+	Space      flexInt64   `json:"space"`
+	Bandwidth  flexInt64   `json:"bandwidth"`
+	ServerName flexString  `json:"server_name"`
+	ServerID   flexString  `json:"serid"`
+	IPs        ipAddresses `json:"ips"`
 }
 
 type ipAddresses []string
@@ -252,11 +251,9 @@ func (provider *Provider) GetServer(ctx context.Context, ref providers.ServerRef
 	var response struct {
 		Info struct {
 			VPS        serverData  `json:"vps"`
+			Status     *flexInt64  `json:"status"`
 			IP         ipAddresses `json:"ip"`
 			ServerName flexString  `json:"server_name"`
-			Flags      struct {
-				EnableConsole *flexBool `json:"enable_console"`
-			} `json:"flags"`
 		} `json:"info"`
 	}
 	if err := provider.request(ctx, url.Values{"act": {"vpsmanage"}, "svs": {id}}, &response); err != nil {
@@ -266,12 +263,13 @@ func (provider *Provider) GetServer(ctx context.Context, ref providers.ServerRef
 	if strconv.FormatInt(int64(data.ID), 10) != id {
 		return providers.RemoteServer{}, providerFailure("Virtualizor returned mismatched VPS data")
 	}
+	if response.Info.Status == nil {
+		return providers.RemoteServer{}, providerFailure("Virtualizor returned missing VPS status")
+	}
+	data.Status = *response.Info.Status
 	data.IPs = response.Info.IP
 	if response.Info.ServerName != "" {
 		data.ServerName = response.Info.ServerName
-	}
-	if response.Info.Flags.EnableConsole != nil {
-		data.EnableConsole = response.Info.Flags.EnableConsole
 	}
 	return normalizeServer(data)
 }
@@ -304,7 +302,8 @@ func normalizeServer(data serverData) (providers.RemoteServer, error) {
 	}
 	encodedAddresses, _ := json.Marshal(addresses)
 	state := mapState(int64(data.Status), bool(data.Suspended))
-	console := bool(data.VNC) && state != providers.StateSuspended && (data.EnableConsole == nil || bool(*data.EnableConsole))
+	// enable_console controls the OpenVZ serial console, not KVM VNC.
+	console := bool(data.VNC) && state != providers.StateSuspended
 	return providers.RemoteServer{ExternalID: id, Scope: scope, Name: name, State: state, RemoteState: strconv.FormatInt(int64(data.Status), 10), Spec: spec, Addresses: encodedAddresses, Capabilities: providers.Capabilities{
 		CanStart:             capability(state == providers.StateStopped, "server must be stopped"),
 		CanStop:              capability(state == providers.StateRunning, "server must be running"),

@@ -47,6 +47,8 @@ var (
 
 const consoleReason = "GCP browser serial console requires a Google Console session; use the provider portal"
 
+const googleTokenURI = "https://oauth2.googleapis.com/token"
+
 func NewFactory() *Factory                      { return newFactory(defaultClient) }
 func newFactory(factory clientFactory) *Factory { return &Factory{newClient: factory} }
 func newProvider(project string, client computeClient) *Provider {
@@ -84,6 +86,12 @@ func validateServiceAccount(raw []byte) error {
 	}
 	if err := json.Unmarshal(raw, &account); err != nil || account.Type != "service_account" || strings.TrimSpace(account.ClientEmail) == "" || strings.TrimSpace(account.PrivateKey) == "" || strings.TrimSpace(account.TokenURI) == "" {
 		return invalidConfig("GCP credentials require a complete service-account JSON object")
+	}
+	// Permit only the canonical Google endpoint before constructing the SDK.
+	// Exact matching also excludes alternate ports, URL userinfo, query strings,
+	// fragments, encoded paths, and caller-selected OAuth destinations.
+	if account.TokenURI != googleTokenURI {
+		return invalidConfig("GCP service-account token URI must be the supported Google HTTPS OAuth endpoint")
 	}
 	return nil
 }
@@ -304,6 +312,12 @@ func classifyError(err error) error {
 		case 401:
 			return &providers.Error{Code: providers.ErrorAuthentication, Message: "GCP credentials were rejected"}
 		case 403:
+			for _, detail := range apiError.Errors {
+				switch detail.Reason {
+				case "rateLimitExceeded", "userRateLimitExceeded", "servingLimitExceeded":
+					return &providers.Error{Code: providers.ErrorRateLimited, Message: "GCP request was rate limited", Retryable: true}
+				}
+			}
 			return &providers.Error{Code: providers.ErrorPermission, Message: "GCP permission was denied"}
 		case 404:
 			return &providers.Error{Code: providers.ErrorNotFound, Message: "GCP instance was not found"}

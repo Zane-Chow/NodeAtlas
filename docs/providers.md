@@ -29,6 +29,8 @@ VirtFusion 6.1 及以上版本可返回短期 VNC WebSocket 信息。上游 WSS 
 
 每个 GCP 连接填写一个显式项目 ID，并提交一份完整的服务账号 JSON。面板只使用该连接保存的 JSON 创建客户端，不会回退到 Application Default Credentials、宿主机环境变量、元数据服务、共享文件、用户 OAuth 或其他连接的身份。服务账号可以访问与其 JSON 中 `project_id` 不同的项目，但必须在界面中填写实际要管理的目标项目 ID。
 
+服务账号 JSON 的 `token_uri` 必须为 Google 官方标准地址 `https://oauth2.googleapis.com/token`。自定义 OAuth 地址及带额外端口、查询参数或片段的地址会在客户端创建前被拒绝。
+
 建议为面板创建专用、最小权限的 IAM 角色，仅授予目标项目或资源所需的以下权限：
 
 - `compute.instances.list`

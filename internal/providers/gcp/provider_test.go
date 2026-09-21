@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,54 @@ func TestFactoryProjectIDRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFactoryRejectsUntrustedTokenURIBeforeClientConstruction(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1) }))
+	t.Cleanup(server.Close)
+	for _, tokenURI := range []string{
+		server.URL + "/token", "http://oauth2.googleapis.com/token",
+		"https://127.0.0.1/token", "https://[::1]/token", "https://10.0.0.1/token", "https://169.254.169.254/token",
+		"https://attacker.example/token", "https://oauth2.googleapis.com.attacker.example/token",
+		"https://userinfo-secret@oauth2.googleapis.com/token", "https://oauth2.googleapis.com/token?secret=query-secret",
+		"https://oauth2.googleapis.com/token?", "https://oauth2.googleapis.com/token#fragment-secret", "https://oauth2.googleapis.com/token#",
+		"https://oauth2.googleapis.com:8443/token", "https://oauth2.googleapis.com:443/token", "https://oauth2.googleapis.com:/token",
+		"https://oauth2.googleapis.com/other", "https://oauth2.googleapis.com/token/", "https://oauth2.googleapis.com/a/../token",
+		"https://oauth2.googleapis.com/%74oken", "https://oauth2.googleapis.com./token", "https://OAUTH2.GOOGLEAPIS.COM/token",
+		"//oauth2.googleapis.com/token", " https://oauth2.googleapis.com/token", "https:oauth2.googleapis.com/token",
+	} {
+		t.Run(tokenURI, func(t *testing.T) {
+			var account map[string]any
+			require.NoError(t, json.Unmarshal([]byte(serviceAccount), &account))
+			account["token_uri"] = tokenURI
+			raw, err := json.Marshal(account)
+			require.NoError(t, err)
+			config := validConfig()
+			config.Credentials, err = json.Marshal(map[string]any{"service_account_json": account})
+			require.NoError(t, err)
+			clientCalls := 0
+			factory := newFactory(func(context.Context, []byte) (computeClient, error) {
+				clientCalls++
+				return &fakeComputeClient{}, nil
+			})
+			provider, err := factory.Create(config)
+			require.Error(t, err)
+			require.Nil(t, provider)
+			require.Zero(t, clientCalls)
+			client, sdkErr := defaultClient(context.Background(), raw)
+			require.Error(t, sdkErr)
+			require.Nil(t, client)
+			for _, failure := range []error{err, sdkErr} {
+				var normalized *providers.Error
+				require.ErrorAs(t, failure, &normalized)
+				require.Equal(t, providers.ErrorInvalidConfig, normalized.Code)
+				require.NotContains(t, failure.Error(), tokenURI)
+				require.NotContains(t, failure.Error(), "private-key-do-not-echo")
+			}
+		})
+	}
+	require.Zero(t, requests.Load())
 }
 
 func TestFactoryKeepsConnectionsIsolated(t *testing.T) {
@@ -300,6 +349,11 @@ func TestErrorsAreNormalizedWithoutLeakingSecrets(t *testing.T) {
 	}{
 		{"401", &googleapi.Error{Code: 401, Message: "private-key-do-not-echo", Body: "raw-response-body"}, providers.ErrorAuthentication, false},
 		{"403", &googleapi.Error{Code: 403, Message: "private-key-do-not-echo", Body: "raw-response-body"}, providers.ErrorPermission, false},
+		{"403 rate limit", &googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: "rateLimitExceeded"}}}, providers.ErrorRateLimited, true},
+		{"403 user rate limit", &googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: "userRateLimitExceeded"}}}, providers.ErrorRateLimited, true},
+		{"403 overall rate limit", &googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: "servingLimitExceeded"}}}, providers.ErrorRateLimited, true},
+		{"403 permission", &googleapi.Error{Code: 403, Errors: []googleapi.ErrorItem{{Reason: "forbidden", Message: "private-key-do-not-echo"}}}, providers.ErrorPermission, false},
+		{"403 does not infer rate limit from message", &googleapi.Error{Code: 403, Message: "rateLimitExceeded"}, providers.ErrorPermission, false},
 		{"404", &googleapi.Error{Code: 404, Body: "raw-response-body"}, providers.ErrorNotFound, false},
 		{"409", &googleapi.Error{Code: 409, Body: "raw-response-body"}, providers.ErrorProvider, false},
 		{"412", &googleapi.Error{Code: 412, Body: "raw-response-body"}, providers.ErrorProvider, false},

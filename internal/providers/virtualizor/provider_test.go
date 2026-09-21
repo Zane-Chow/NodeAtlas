@@ -61,7 +61,7 @@ func consoleFixture(t *testing.T, vnc any, available bool) *Provider {
 		}
 		switch q.Get("act") {
 		case "vpsmanage":
-			writeJSON(t, w, map[string]any{"info": map[string]any{"vps": map[string]any{"vpsid": 3332, "vnc": available, "status": 1}}})
+			writeJSON(t, w, map[string]any{"info": map[string]any{"status": 1, "vps": map[string]any{"vpsid": 3332, "vnc": available}}})
 		case "vnc":
 			if !available {
 				t.Error("requested unavailable VNC")
@@ -101,6 +101,32 @@ func TestProviderOpensVNCAndCleanPortal(t *testing.T) {
 	portal.RawQuery = "modified"
 	require.Empty(t, p.panelURL.RawQuery)
 	require.Empty(t, p.apiURL.RawQuery)
+}
+
+func TestProviderOpensKVMVNCWithOpenVZConsoleDisabled(t *testing.T) {
+	var vncCalls atomic.Int32
+	p := fixtureProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("act") {
+		case "vpsmanage":
+			writeJSON(t, w, map[string]any{"info": map[string]any{
+				"status": 1,
+				"vps":    map[string]any{"vpsid": 3332, "virt": "kvm", "vnc": "1", "suspended": "0"},
+				"flags":  map[string]any{"enable_console": 0},
+			}})
+		case "vnc":
+			vncCalls.Add(1)
+			writeJSON(t, w, map[string]any{"ip": "198.51.100.30", "port": 5951, "password": "temporary-vnc", "novnc": 1})
+		default:
+			t.Error("unexpected console action")
+		}
+	})
+	for _, mode := range []providers.ConsoleMode{providers.ConsoleEmbedded, providers.ConsoleWindow} {
+		target, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "3332"}, mode)
+		require.NoError(t, err)
+		require.Equal(t, "vnc+tcp://198.51.100.30:5951", target.URL.String())
+		require.Equal(t, mode, target.Mode)
+	}
+	require.EqualValues(t, 2, vncCalls.Load())
 }
 
 func TestProviderRejectsInvalidVNC(t *testing.T) {
@@ -318,17 +344,58 @@ func TestProviderGetsServer(t *testing.T) {
 					t.Error("unexpected lookup query")
 				}
 				writeJSON(t, w, map[string]any{"info": map[string]any{
-					"vps": map[string]any{"vpsid": 3332, "hostname": "edge", "status": "1", "vnc": true, "serid": "7"},
-					"ip":  map[string]any{"s1": "198.51.100.20", "s2": "2001:db8::20"}, "server_name": "node-a",
+					"status": "1",
+					"vps":    map[string]any{"vpsid": 3332, "hostname": "edge", "vnc": !disabled, "serid": "7"},
+					"ip":     map[string]any{"s1": "198.51.100.20", "s2": "2001:db8::20"}, "server_name": "node-a",
 					"flags": map[string]any{"enable_console": !disabled},
 				}})
 			})
 			server, err := p.GetServer(context.Background(), providers.ServerRef{ExternalID: "3332"})
 			require.NoError(t, err)
 			require.Equal(t, "node-a", server.Scope)
+			require.Equal(t, providers.StateRunning, server.State)
 			require.Equal(t, !disabled, server.Capabilities.CanEmbedConsole.Available)
 			require.True(t, server.Capabilities.HasProviderPortal.Available)
 			require.JSONEq(t, `[{"type":"ipv4","address":"198.51.100.20"},{"type":"ipv6","address":"2001:db8::20"}]`, string(server.Addresses))
+		})
+	}
+}
+
+func TestProviderGetsUsesAndValidatesInfoStatus(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		status    any
+		suspended bool
+		state     providers.ServerState
+	}{
+		{"running", 1, false, providers.StateRunning},
+		{"stopped string", "0", false, providers.StateStopped},
+		{"suspended status", "2", false, providers.StateSuspended},
+		{"suspension wins", 1, true, providers.StateSuspended},
+		{"unknown", 9, false, providers.StateUnknown},
+		{"missing", nil, false, ""},
+		{"null", json.RawMessage(`null`), false, ""},
+		{"malformed", "bad", false, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := fixtureProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				info := map[string]any{"vps": map[string]any{"vpsid": 3332, "vnc": 1, "suspended": test.suspended}}
+				if test.status != nil {
+					info["status"] = test.status
+				}
+				writeJSON(t, w, map[string]any{"info": info})
+			})
+			server, err := p.GetServer(context.Background(), providers.ServerRef{ExternalID: "3332"})
+			if test.state == "" {
+				assertSafeError(t, err, providers.ErrorProvider)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.state, server.State)
+			require.Equal(t, test.state == providers.StateRunning, server.Capabilities.CanStop.Available)
+			if test.state == providers.StateSuspended {
+				require.False(t, server.Capabilities.CanEmbedConsole.Available)
+			}
 		})
 	}
 }
