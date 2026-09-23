@@ -57,7 +57,7 @@ func TestServiceReturnsOnlyValidatedWindowAndPortalURLs(t *testing.T) {
 }
 
 func TestServiceRawTCPRequiresExactVirtualizorProvider(t *testing.T) {
-	for _, providerType := range []string{"virtualizor", "virtfusion", "mock", "Virtualizor", "virtualizor-other"} {
+	for _, providerType := range []string{"virtualizor", "virtfusion", "mock", "solusvm2", "Virtualizor", "VIRTUALIZOR", "virtualizor-other", "other-virtualizor", "virtualizor2", "pvepanel-future"} {
 		t.Run(providerType, func(t *testing.T) {
 			fixture := newServiceFixture(t)
 			connectionRepository := fixture.service.connections.(*memoryConnections)
@@ -84,6 +84,83 @@ func TestServiceRawTCPRequiresExactVirtualizorProvider(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServiceSolusVMWSSKeepsTargetAndSecretsOutOfPersistedSession(t *testing.T) {
+	fixture := newServiceFixture(t)
+	configureSolusConsole(t, fixture.service)
+	sqlRepository, _ := openSQLiteConsoleRepository(t)
+	fixture.service.sessions = sqlRepository
+	created, err := fixture.service.CreateEmbedded(context.Background(), "server-a", "request-a", "192.0.2.10")
+	require.NoError(t, err)
+	require.Equal(t, "rfb", created.Protocol)
+	require.Equal(t, "solus-temporary-password", created.Credentials.Password)
+	// Only the authenticated session creation response carries the short-lived password.
+	public := created
+	public.Credentials = nil
+	persisted, err := sqlRepository.FindByID(context.Background(), created.SessionID)
+	require.NoError(t, err)
+	rows, err := sqlRepository.db.QueryContext(context.Background(), "SELECT * FROM console_sessions")
+	require.NoError(t, err)
+	defer rows.Close()
+	columns, err := rows.Columns()
+	require.NoError(t, err)
+	require.True(t, rows.Next())
+	values, destinations := make([][]byte, len(columns)), make([]any, len(columns))
+	for i := range values {
+		destinations[i] = &values[i]
+	}
+	require.NoError(t, rows.Scan(destinations...))
+	for _, forbidden := range []string{"console.example.test", "203.0.113.20", "5901", "solus-temporary-password", "credential-secret", "d9428888-122b-11e1-b85c-61cd3cbb3210", "fixed-console-ticket"} {
+		if forbidden != "fixed-console-ticket" {
+			require.NotContains(t, string(mustJSON(t, public)), forbidden)
+		}
+		require.NotContains(t, string(mustJSON(t, persisted)), forbidden)
+		require.NotContains(t, string(mustJSON(t, fixture.audit.entries)), forbidden)
+		for _, value := range values {
+			require.NotContains(t, string(value), forbidden)
+		}
+	}
+	target, ok := fixture.targets.Take(created.SessionID)
+	require.True(t, ok)
+	require.Equal(t, "wss", target.Scheme)
+	require.Equal(t, "203.0.113.20:5901/d9428888-122b-11e1-b85c-61cd3cbb3210", target.Query().Get("url"))
+	require.NotContains(t, target.String(), "password")
+}
+
+func TestServiceSolusVMWSSStillRequiresCentralPolicyBeforePersistence(t *testing.T) {
+	fixture := newServiceFixture(t)
+	configureSolusConsole(t, fixture.service)
+	fixture.service.policy = NewTargetPolicy(staticResolver{"console.example.test": {net.ParseIP("10.1.2.3")}}, TargetPolicyOptions{})
+	created, err := fixture.service.CreateEmbedded(context.Background(), "server-a", "request-a", "192.0.2.10")
+	require.ErrorIs(t, err, ErrTargetRejected)
+	require.Empty(t, created.Ticket)
+	require.Empty(t, fixture.repository.created.ID)
+	require.Empty(t, fixture.audit.entries)
+	_, ok := fixture.targets.Take("session-a")
+	require.False(t, ok)
+}
+
+func configureSolusConsole(t *testing.T, service *Service) {
+	t.Helper()
+	repository := service.connections.(*memoryConnections)
+	repository.connection.ProviderType = "solusvm2"
+	envelope, err := service.cipher.Encrypt("connection-a", "solusvm2", []byte(`{"api_token":"credential-secret"}`))
+	require.NoError(t, err)
+	repository.credentials = connections.CredentialRecord{Ciphertext: envelope.Ciphertext, Nonce: envelope.Nonce, KeyVersion: envelope.KeyVersion}
+	require.NoError(t, service.registry.Register("solusvm2", solusConsoleFactory{}))
+}
+
+type solusConsoleFactory struct{}
+
+func (solusConsoleFactory) Create(providers.ConnectionConfig) (providers.Provider, error) {
+	return solusConsoleProvider{}, nil
+}
+
+type solusConsoleProvider struct{ fakeConsoleProvider }
+
+func (solusConsoleProvider) OpenConsole(_ context.Context, _ providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
+	return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", Password: "solus-temporary-password", URL: mustProviderURL("wss://console.example.test/vnc?url=203.0.113.20%3A5901%2Fd9428888-122b-11e1-b85c-61cd3cbb3210")}, nil
 }
 
 type rawConsoleFactory struct{}

@@ -2,8 +2,11 @@ package console
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -34,6 +37,7 @@ type TargetPolicyOptions struct {
 	AllowedPrivateCIDRs []*net.IPNet
 	AllowMockTransport  bool
 	Dialer              TCPDialer
+	RootCAs             *x509.CertPool
 }
 
 type TargetPolicy struct {
@@ -126,9 +130,13 @@ func (policy *TargetPolicy) DialTCP(ctx context.Context, target *url.URL) (net.C
 	if err := validateRawTarget(target); err != nil {
 		return nil, err
 	}
+	return policy.dialAllowed(ctx, target.Hostname(), target.Port())
+}
+
+func (policy *TargetPolicy) dialAllowed(ctx context.Context, host, port string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	addresses, err := policy.resolveAllowed(ctx, target.Hostname())
+	addresses, err := policy.resolveAllowed(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -136,12 +144,50 @@ func (policy *TargetPolicy) DialTCP(ctx context.Context, target *url.URL) (net.C
 		if ctx.Err() != nil {
 			break
 		}
-		connection, err := policy.options.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(address.String(), target.Port()))
+		connection, err := policy.options.Dialer.DialContext(ctx, "tcp", net.JoinHostPort(address.String(), port))
 		if err == nil {
 			return connection, nil
 		}
 	}
 	return nil, ErrTargetUnavailable
+}
+
+// webSocketClient keeps the TLS identity and HTTP origin intact while resolving
+// again at the actual TCP dial and connecting only to policy-approved literals.
+func (policy *TargetPolicy) webSocketClient(ctx context.Context, target *url.URL) (*http.Client, error) {
+	if policy == nil || target == nil || target.Scheme != "wss" || target.Opaque != "" {
+		return nil, ErrTargetRejected
+	}
+	if err := policy.ValidateEmbedded(ctx, target); err != nil {
+		return nil, err
+	}
+	port := target.Port()
+	if port == "" {
+		port = "443"
+	}
+	value, err := strconv.Atoi(port)
+	if err != nil || value < 1 || value > 65535 || strconv.Itoa(value) != port {
+		return nil, ErrTargetRejected
+	}
+	transport := &http.Transport{
+		// Proxy intentionally remains nil: an environment proxy must not resolve
+		// the host again or bypass the address policy applied by DialContext.
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, dialPort, err := net.SplitHostPort(address)
+			if err != nil || !strings.EqualFold(host, target.Hostname()) || dialPort != port {
+				return nil, ErrTargetRejected
+			}
+			return policy.dialAllowed(ctx, host, dialPort)
+		},
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: policy.options.RootCAs},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	return &http.Client{
+		Transport:     transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return ErrTargetRejected },
+	}, nil
 }
 
 func validateURLShape(target *url.URL) error {

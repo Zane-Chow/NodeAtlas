@@ -88,7 +88,12 @@ func (gateway *WebSocketGateway) proxy(ctx context.Context, downstream *websocke
 	if target.Scheme == "mock+ws" {
 		return gateway.runMock(ctx, downstream)
 	}
-	upstream, _, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled})
+	client, err := gateway.options.TargetPolicy.webSocketClient(ctx, target)
+	if err != nil {
+		return ResultFailed
+	}
+	defer client.CloseIdleConnections()
+	upstream, _, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{HTTPClient: client, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		return ResultFailed
 	}

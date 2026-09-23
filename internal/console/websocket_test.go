@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -188,6 +192,140 @@ func TestWebSocketGatewayRejectsUnknownTicket(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, response)
 	require.Equal(t, 401, response.StatusCode)
+}
+
+func TestWebSocketGatewayWSSPinsPolicyDialAndKeepsPanelTLSHostname(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		require.Equal(t, "example.com", r.TLS.ServerName)
+		require.Equal(t, "/vnc", r.URL.Path)
+		require.Equal(t, "203.0.113.20:5901/d9428888-122b-11e1-b85c-61cd3cbb3210", r.URL.Query().Get("url"))
+		require.Empty(t, r.Header.Get("Authorization"))
+		connection, err := websocket.Accept(w, r, nil)
+		require.NoError(t, err)
+		defer connection.CloseNow()
+		kind, payload, err := connection.Read(r.Context())
+		if err == nil {
+			_ = connection.Write(r.Context(), kind, payload)
+		}
+		_, _, _ = connection.Read(r.Context())
+	}))
+	t.Cleanup(upstream.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(upstream.Certificate())
+	for _, tc := range []struct {
+		host    string
+		trusted bool
+	}{{"example.com", true}, {"wrong.example.test", true}, {"example.com", false}} {
+		t.Run(tc.host+"/trusted="+strconv.FormatBool(tc.trusted), func(t *testing.T) {
+			host := tc.host
+			var dials atomic.Int32
+			var resolutions atomic.Int32
+			var roots *x509.CertPool
+			if tc.trusted {
+				roots = pool
+			}
+			policy := NewTargetPolicy(resolverFunc(func(context.Context, string) ([]net.IP, error) {
+				if resolutions.Add(1) == 1 {
+					return []net.IP{net.ParseIP("203.0.113.9")}, nil
+				}
+				return []net.IP{net.ParseIP("203.0.113.10")}, nil
+			}), TargetPolicyOptions{
+				RootCAs: roots,
+				Dialer: tcpDialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+					dials.Add(1)
+					require.Equal(t, "203.0.113.10:443", address)
+					return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+				}),
+			})
+			fixture := newWSSGatewayFixture(t, "wss://"+host+"/vnc?url=203.0.113.20%3A5901%2Fd9428888-122b-11e1-b85c-61cd3cbb3210", policy)
+			connection := fixture.Dial(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if host == "example.com" && tc.trusted {
+				want := []byte{0, 1, 2, 255}
+				require.NoError(t, connection.Write(ctx, websocket.MessageBinary, want))
+				kind, payload, err := connection.Read(ctx)
+				require.NoError(t, err)
+				require.Equal(t, websocket.MessageBinary, kind)
+				require.Equal(t, want, payload)
+				require.NoError(t, connection.Close(websocket.StatusNormalClosure, "done"))
+				require.Eventually(t, func() bool { return fixture.Repository.result() == ResultCompleted }, time.Second, time.Millisecond)
+			} else {
+				_, _, _ = connection.Read(ctx)
+				require.Eventually(t, func() bool { return fixture.Repository.result() == ResultFailed }, time.Second, time.Millisecond)
+			}
+			require.EqualValues(t, 1, dials.Load())
+			require.EqualValues(t, 2, resolutions.Load())
+			_, exists := fixture.Targets.Take("session-a")
+			require.False(t, exists)
+		})
+	}
+	require.EqualValues(t, 1, requests.Load(), "invalid TLS hostname must never reach the HTTP handler")
+}
+
+func TestWebSocketGatewayWSSRechecksDNSAfterTicketAndRejectsMixedAnswers(t *testing.T) {
+	for _, blocked := range []string{"127.0.0.1", "169.254.169.254", "10.0.0.1", "::1"} {
+		t.Run(blocked, func(t *testing.T) {
+			var lookups atomic.Int32
+			policy := NewTargetPolicy(resolverFunc(func(context.Context, string) ([]net.IP, error) {
+				if lookups.Add(1) <= 2 {
+					return []net.IP{net.ParseIP("203.0.113.10")}, nil
+				}
+				return []net.IP{net.ParseIP("203.0.113.10"), net.ParseIP(blocked)}, nil
+			}), TargetPolicyOptions{Dialer: tcpDialerFunc(func(context.Context, string, string) (net.Conn, error) {
+				t.Error("WSS must not dial a rebinding DNS answer set")
+				return nil, ErrTargetRejected
+			})})
+			target := "wss://panel.example.test/vnc?url=203.0.113.20%3A5901%2Fuuid"
+			require.NoError(t, policy.ValidateEmbedded(context.Background(), mustGatewayURL(t, target)))
+			fixture := newWSSGatewayFixture(t, target, policy)
+			connection := fixture.Dial(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_, _, _ = connection.Read(ctx)
+			require.Eventually(t, func() bool { return fixture.Repository.result() == ResultFailed }, time.Second, time.Millisecond)
+			require.EqualValues(t, 3, lookups.Load())
+		})
+	}
+}
+
+func TestWebSocketGatewayWSSRejectsRedirectAndMissingPolicy(t *testing.T) {
+	var requests atomic.Int32
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, "https://untrusted.invalid/secret", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(upstream.Close)
+	pool := x509.NewCertPool()
+	pool.AddCert(upstream.Certificate())
+	policy := NewTargetPolicy(staticResolver{"example.com": {net.ParseIP("203.0.113.10")}}, TargetPolicyOptions{
+		RootCAs: pool, Dialer: tcpDialerFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, upstream.Listener.Addr().String())
+		}),
+	})
+	for _, policy := range []*TargetPolicy{policy, nil} {
+		fixture := newWSSGatewayFixture(t, "wss://example.com/vnc", policy)
+		connection := fixture.Dial(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _, _ = connection.Read(ctx)
+		cancel()
+		require.Eventually(t, func() bool { return fixture.Repository.result() == ResultFailed }, time.Second, time.Millisecond)
+	}
+	require.EqualValues(t, 1, requests.Load())
+}
+
+func newWSSGatewayFixture(t *testing.T, target string, policy *TargetPolicy) rawGatewayFixture {
+	t.Helper()
+	ticket := "one-use-wss-ticket"
+	hash := sha256.Sum256([]byte(ticket))
+	repository := &gatewayRepository{session: Session{ID: "session-a", ServerID: "server-a", TicketHash: hash[:], ExpiresAt: time.Now().Add(time.Minute), Result: ResultPending}}
+	targets := NewMemoryTargetStore()
+	targets.Put("session-a", mustGatewayURL(t, target))
+	server := httptest.NewServer(NewWebSocketGateway(repository, targets, nil, GatewayOptions{TargetPolicy: policy}))
+	t.Cleanup(server.Close)
+	return rawGatewayFixture{Repository: repository, Targets: targets, Address: "ws" + strings.TrimPrefix(server.URL, "http") + "/console/" + ticket}
 }
 
 type gatewayRepository struct {

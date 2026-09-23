@@ -12,12 +12,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"controlpanel/internal/providers"
 	providernetwork "controlpanel/internal/providers/network"
+	"github.com/google/uuid"
 )
 
 const (
@@ -385,8 +387,84 @@ func (provider *Provider) power(ctx context.Context, ref providers.ServerRef, ac
 	return providers.ActionReceipt{RequestID: response.Data.ID.String()}, nil
 }
 
-func (provider *Provider) OpenConsole(context.Context, providers.ServerRef, providers.ConsoleMode) (providers.ConsoleTarget, error) {
-	return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorUnsupported, Message: "SolusVM 2 VNC is not available yet; use the provider portal"}
+func (provider *Provider) OpenConsole(ctx context.Context, ref providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
+	if mode != providers.ConsoleEmbedded && mode != providers.ConsoleWindow {
+		return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorUnsupported, Message: "SolusVM 2 console mode is unsupported"}
+	}
+	server, err := provider.GetServer(ctx, ref)
+	if err != nil {
+		return providers.ConsoleTarget{}, err
+	}
+	if !server.Capabilities.CanEmbedConsole.Available {
+		return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorUnsupported, Message: "SolusVM 2 VNC is unavailable for this server"}
+	}
+	// vnc_up has a top-level transport envelope. Deliberately omit vnc_proxy_url:
+	// only the configured panel origin is trusted to provide the WSS transport.
+	var response struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+		VM   struct {
+			ID       json.Number `json:"id"`
+			UUID     string      `json:"uuid"`
+			Settings struct {
+				Password string `json:"vnc_password"`
+			} `json:"settings"`
+		} `json:"vm"`
+	}
+	if err := provider.request(ctx, http.MethodPost, "/servers/"+server.ExternalID+"/vnc_up", nil, nil, &response); err != nil {
+		return providers.ConsoleTarget{}, err
+	}
+	id, err := uuid.Parse(response.VM.UUID)
+	if err != nil || id == uuid.Nil || id.String() != response.VM.UUID || response.VM.ID.String() != server.ExternalID || response.Port < 1 || response.Port > 65535 || !validConsoleHost(response.Host) || !validConsolePassword(response.VM.Settings.Password) {
+		return providers.ConsoleTarget{}, providerFailure("SolusVM 2 returned invalid VNC data")
+	}
+	addresses, err := provider.policy.ResolveAllowed(ctx, response.Host)
+	if err != nil {
+		return providers.ConsoleTarget{}, providerFailure("SolusVM 2 returned an untrusted VNC address")
+	}
+	// The management node opens the compute connection. Pin an allowed literal so
+	// that it cannot resolve a supplied hostname again after our policy check.
+	hosts := make([]string, len(addresses))
+	for i, address := range addresses {
+		hosts[i] = address.String()
+	}
+	sort.Strings(hosts)
+	target := *provider.panelURL
+	target.Scheme, target.Path = "wss", "/vnc"
+	target.RawQuery = url.Values{"url": {net.JoinHostPort(hosts[0], strconv.Itoa(response.Port)) + "/" + response.VM.UUID}}.Encode()
+	return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", URL: &target, Password: response.VM.Settings.Password}, nil
+}
+
+func validConsoleHost(host string) bool {
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(host, "."), ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validConsolePassword(password string) bool {
+	if strings.TrimSpace(password) == "" || len(password) > 4096 {
+		return false
+	}
+	for _, c := range password {
+		if c < 32 || c == 127 {
+			return false
+		}
+	}
+	return true
 }
 func (provider *Provider) ProviderPortalURL(context.Context, providers.ServerRef) (*url.URL, error) {
 	copy := *provider.panelURL

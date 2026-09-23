@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ import (
 
 	"controlpanel/internal/providers"
 	"controlpanel/internal/providers/contracttest"
+	providernetwork "controlpanel/internal/providers/network"
 	"github.com/stretchr/testify/require"
 )
 
@@ -391,4 +393,223 @@ func TestRedirectTLSAndTimeoutSafety(t *testing.T) {
 	require.NoError(t, err)
 	_, err = untrusted.ValidateConnection(context.Background())
 	assertSafeError(t, err, providers.ErrorNetwork)
+}
+
+const fixtureVMUUID = "d9428888-122b-11e1-b85c-61cd3cbb3210"
+
+func fixtureVNC() map[string]any {
+	return map[string]any{
+		"host": "203.0.113.20", "port": 5901,
+		"vm": map[string]any{"id": 1, "uuid": fixtureVMUUID, "settings": map[string]any{"vnc_password": "temporary-vnc-password"}},
+		// This upstream extension is deliberately untrusted and not a transport URL.
+		"vnc_proxy_url": "wss://untrusted.invalid/body-secret", "extra": "body-secret",
+	}
+}
+
+func consoleFixture(t *testing.T, serverData, vncData map[string]any) (*Provider, *atomic.Int32) {
+	t.Helper()
+	calls := &atomic.Int32{}
+	p := fixtureProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/servers/1":
+			require.Equal(t, http.MethodGet, r.Method)
+			writeJSON(t, w, map[string]any{"data": serverData})
+		case "/api/v1/servers/1/vnc_up":
+			calls.Add(1)
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			require.Empty(t, r.URL.RawQuery)
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.Empty(t, body)
+			writeJSON(t, w, vncData)
+		default:
+			t.Errorf("unexpected console request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	return p, calls
+}
+
+func TestOpenConsoleConstructsPanelWSSForBothModes(t *testing.T) {
+	for _, mode := range []providers.ConsoleMode{providers.ConsoleEmbedded, providers.ConsoleWindow} {
+		for _, host := range []string{"203.0.113.20", "2001:db8::20", "compute.example.test"} {
+			t.Run(string(mode)+"/"+host, func(t *testing.T) {
+				response := fixtureVNC()
+				response["host"] = host
+				p, calls := consoleFixture(t, fixtureServer(1, "started"), response)
+				p.policy = providernetwork.NewPolicy(resolverFunc(func(_ context.Context, network, name string) ([]net.IP, error) {
+					require.Equal(t, "ip", network)
+					require.Equal(t, "compute.example.test", name)
+					return []net.IP{net.ParseIP("203.0.113.21"), net.ParseIP("203.0.113.20")}, nil
+				}), providernetwork.PolicyOptions{})
+				target, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, mode)
+				require.NoError(t, err)
+				require.EqualValues(t, 1, calls.Load())
+				require.Equal(t, mode, target.Mode)
+				require.Equal(t, "rfb", target.Protocol)
+				require.Equal(t, "temporary-vnc-password", target.Password)
+				require.Equal(t, "wss", target.URL.Scheme)
+				require.Equal(t, p.panelURL.Host, target.URL.Host)
+				require.Equal(t, "/vnc", target.URL.Path)
+				require.Nil(t, target.URL.User)
+				require.Empty(t, target.URL.Fragment)
+				require.Len(t, target.URL.Query(), 1)
+				if host == "compute.example.test" {
+					host = "203.0.113.20" // Stable literal prevents management-node DNS rebinding.
+				}
+				require.Equal(t, net.JoinHostPort(host, "5901")+"/"+fixtureVMUUID, target.URL.Query().Get("url"))
+				for _, secret := range []string{fixtureToken, "body-secret", "temporary-vnc-password", "compute.example.test", "untrusted.invalid"} {
+					require.NotContains(t, target.URL.String(), secret)
+				}
+			})
+		}
+	}
+}
+
+func TestOpenConsoleValidatesCapabilityAndModeBeforeVNCRequest(t *testing.T) {
+	for _, kind := range []string{"disabled", "suspended", "unsupported mode", "bad ID"} {
+		t.Run(kind, func(t *testing.T) {
+			server := fixtureServer(1, "started")
+			mode, ref := providers.ConsoleEmbedded, providers.ServerRef{ExternalID: "1"}
+			if kind == "disabled" {
+				server["settings"] = map[string]any{"vnc_enabled": false}
+			}
+			if kind == "suspended" {
+				server["is_suspended"] = true
+			}
+			if kind == "unsupported mode" {
+				mode = "portal"
+			}
+			if kind == "bad ID" {
+				ref.ExternalID = "01"
+			}
+			p, calls := consoleFixture(t, server, fixtureVNC())
+			target, err := p.OpenConsole(context.Background(), ref, mode)
+			code := providers.ErrorUnsupported
+			if kind == "bad ID" {
+				code = providers.ErrorNotFound
+			}
+			assertSafeError(t, err, code)
+			require.Nil(t, target.URL)
+			require.Empty(t, target.Password)
+			require.Zero(t, calls.Load())
+		})
+	}
+}
+
+func TestOpenConsoleRejectsMalformedUpstreamData(t *testing.T) {
+	mutations := map[string]func(map[string]any){
+		"missing host":     func(v map[string]any) { delete(v, "host") },
+		"missing VM":       func(v map[string]any) { delete(v, "vm") },
+		"wrong ID":         func(v map[string]any) { v["vm"].(map[string]any)["id"] = 2 },
+		"noncanonical ID":  func(v map[string]any) { v["vm"].(map[string]any)["id"] = "01" },
+		"missing password": func(v map[string]any) { v["vm"].(map[string]any)["settings"] = map[string]any{} },
+		"empty password":   func(v map[string]any) { v["vm"].(map[string]any)["settings"] = map[string]any{"vnc_password": ""} },
+		"wrong envelope":   func(v map[string]any) { v["data"] = fixtureVNC(); delete(v, "host") },
+	}
+	for _, host := range []string{"", " body-secret", "body-secret ", "host/path", "host?token=body-secret", "user@host", "host#fragment", "host\\path", "host:5901", "[2001:db8::1]", "fe80::1%eth0", "host\nbody-secret", "host..test", "-host.test", "host-.test", "https://host", strings.Repeat("a", 64) + ".test"} {
+		mutations["host/"+host] = func(v map[string]any) { v["host"] = host }
+	}
+	for _, port := range []any{nil, 0, -1, 65536, 1.5, "5901", "body-secret"} {
+		mutations[fmt.Sprintf("port/%v", port)] = func(v map[string]any) { v["port"] = port }
+	}
+	for _, id := range []string{"", "body-secret", "d9428888122b11e1b85c61cd3cbb3210", strings.ToUpper(fixtureVMUUID), "00000000-0000-0000-0000-000000000000", fixtureVMUUID + "/path"} {
+		mutations["UUID/"+id] = func(v map[string]any) { v["vm"].(map[string]any)["uuid"] = id }
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			response := fixtureVNC()
+			mutate(response)
+			p, _ := consoleFixture(t, fixtureServer(1, "started"), response)
+			target, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleEmbedded)
+			assertSafeError(t, err, providers.ErrorProvider)
+			require.Nil(t, target.URL)
+			require.Empty(t, target.Password)
+		})
+	}
+}
+
+func TestOpenConsoleAppliesComputeNetworkPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		host, cidr string
+		addresses  []net.IP
+		allowed    bool
+	}{
+		{host: "10.20.1.5"}, {host: "10.20.1.5", cidr: "10.20.0.0/16", allowed: true},
+		{host: "fd00::5"}, {host: "fd00::5", cidr: "fd00::/64", allowed: true},
+		{host: "127.0.0.1"}, {host: "169.254.169.254"}, {host: "0.0.0.0"}, {host: "::1"},
+		{host: "compute.example.test", addresses: []net.IP{net.ParseIP("203.0.113.20"), net.ParseIP("10.20.1.5")}},
+		{host: "compute.example.test"},
+	} {
+		t.Run(tc.host+tc.cidr, func(t *testing.T) {
+			response := fixtureVNC()
+			response["host"] = tc.host
+			p, _ := consoleFixture(t, fixtureServer(1, "started"), response)
+			var allowed []*net.IPNet
+			if tc.cidr != "" {
+				_, cidr, err := net.ParseCIDR(tc.cidr)
+				require.NoError(t, err)
+				allowed = []*net.IPNet{cidr}
+			}
+			p.policy = providernetwork.NewPolicy(resolverFunc(func(context.Context, string, string) ([]net.IP, error) { return tc.addresses, nil }), providernetwork.PolicyOptions{AllowedPrivateCIDRs: allowed})
+			target, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleEmbedded)
+			if tc.allowed {
+				require.NoError(t, err)
+				require.Equal(t, net.JoinHostPort(tc.host, "5901")+"/"+fixtureVMUUID, target.URL.Query().Get("url"))
+			} else {
+				assertSafeError(t, err, providers.ErrorProvider)
+				require.Nil(t, target.URL)
+				require.NotContains(t, err.Error(), tc.host)
+			}
+		})
+	}
+}
+
+func TestOpenConsoleRechecksComputeDNSForEachSession(t *testing.T) {
+	response := fixtureVNC()
+	response["host"] = "compute.example.test"
+	p, _ := consoleFixture(t, fixtureServer(1, "started"), response)
+	var resolutions atomic.Int32
+	p.policy = providernetwork.NewPolicy(resolverFunc(func(context.Context, string, string) ([]net.IP, error) {
+		if resolutions.Add(1) == 1 {
+			return []net.IP{net.ParseIP("203.0.113.20")}, nil
+		}
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}), providernetwork.PolicyOptions{})
+	first, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleEmbedded)
+	require.NoError(t, err)
+	require.Contains(t, first.URL.Query().Get("url"), "203.0.113.20:5901")
+	second, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleWindow)
+	assertSafeError(t, err, providers.ErrorProvider)
+	require.Nil(t, second.URL)
+	require.EqualValues(t, 2, resolutions.Load())
+}
+
+func TestOpenConsoleSanitizesVNCRequestErrors(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   providers.ErrorCode
+	}{
+		{401, providers.ErrorAuthentication}, {403, providers.ErrorPermission},
+		{404, providers.ErrorNotFound}, {422, providers.ErrorProvider}, {429, providers.ErrorRateLimited}, {500, providers.ErrorProvider},
+	} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			p := fixtureProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					writeJSON(t, w, map[string]any{"data": fixtureServer(1, "started")})
+					return
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte("body-secret " + fixtureToken + " temporary-vnc-password 203.0.113.20:5901"))
+			})
+			target, err := p.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleEmbedded)
+			assertSafeError(t, err, tc.code)
+			for _, secret := range []string{"temporary-vnc-password", "203.0.113.20", "5901"} {
+				require.NotContains(t, err.Error(), secret)
+			}
+			require.Nil(t, target.URL)
+			require.Empty(t, target.Password)
+		})
+	}
 }
