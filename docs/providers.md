@@ -63,3 +63,29 @@ PROVIDER_ALLOWED_PRIVATE_CIDRS=10.30.4.0/24,fd10:20::/64
 Virtualizor 协议要求 `apikey` 与 `apipass` 出现在发往上游的查询字符串中。本应用只在受保护的后端请求中按协议发送它们，并在其他所有位置进行隐藏：不会把包含凭据的上游 URL 写入日志、错误、审计、服务器清单或浏览器响应。服务商后台回退链接只包含面板地址、`vpsmanage` 和 VPS ID，不含凭据。
 
 可用的原始 VNC 连接由后端通过一次性、本地同源 WebSocket 票据代理。上游 IP、端口和临时密码只存在于短期内存会话中；浏览器仅连接本面板的 WebSocket。内嵌与新窗口 noVNC 使用相同机制。VNC 不可用时，两种 VNC 入口都会禁用，但不含凭据的 Virtualizor 管理页仍可打开。私网 VNC 目标同样必须落在 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的允许范围内。
+
+## SolusVM 2
+
+仅支持 SolusVM 2 management node 的 REST API v1，不支持 SolusVM 1。连接地址填写 HTTPS 根地址，例如 `https://panel.example.com`，也接受规范的 `/api/v1` 后缀。每个连接独立保存一个 API Token，当前无额外 settings；不要将 Token 放进地址。接口兼容性以 [SolusVM 2 API 文档](https://docs.solusvm.com/en/solusvm2/api-reference/api/) 和目标服务商实际部署版本为准，不假设所有历史版本或定制面板具有相同响应。
+
+在有权限的 SolusVM 2 管理界面中打开 `Access > API Tokens`，选择生成 Token，为此面板单独命名并妥善保存生成值；关闭复制对话框后无法再次查看。客户账号若没有此入口，应由服务商提供具有相应权限的 Token。参见 [官方 Token 创建说明](https://docs.solusvm.com/en/solusvm2/billing-integration-guide/prepaid-billing/installation-and-configuration/initial-configuration/)。
+
+权限应尽量限制到要管理的服务器。适配器实际只需要读取服务器列表/详情、开机、正常关机、正常重启，以及启用 VNC 的能力，对应以下调用：
+
+- `GET /servers` 与 `GET /servers/{id}`。
+- `POST /servers/{id}/start`、`stop`、`restart`。
+- `POST /servers/{id}/vnc_up`（使用 VNC 时）。
+
+这些是 API 操作路径，不是 Token scope 名称；可选权限粒度取决于服务商版本和账号配置。连接测试只验证列表读取成功，不能证明所有电源和 VNC 权限均已授予。API Token 只用于后端 Bearer 认证，加密入库，保存后不回显。不要将其写入源码、镜像、日志或浏览器存储；轮换后先验证新 Token 可用，再撤销旧 Token。
+
+API 与控制台均要求有效的 TLS 证书，不支持跳过证书校验。私网 management node 及 `vnc_up` 返回的私网 compute host 必须通过 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行最小必要网段。若 management node 的 WSS 地址位于私网，还必须在 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 中放行该管理节点网段。保存、DNS 解析、实际拨号均执行地址策略；API 只允许同源 HTTPS 重定向，WSS 连接拒绝重定向。
+
+关机和重启显式发送 `{"force":false}`，不请求强制断电或强制复位；来宾系统仍须能够响应服务商的正常关机机制。操作完成由后续状态查询确认。挂起服务器不提供电源或 VNC 操作。
+
+VNC 使用经过验证的 management node origin 上的 WSS `/vnc` 代理，不直接连接 raw VNC。后端校验 `vnc_up` 的 compute host、端口和 VM UUID，检查全部 DNS 结果，并将其中一个允许的 IP 固定在上游代理目标中，避免 management node 再次解析该主机名。多地址时选择排序后的第一个允许 IP，目前不自动故障转移。实现不依赖 `vnc_proxy_url`，不会使用该字段替换已配置的 WSS origin。
+
+浏览器只获得本面板的一次性票据和 noVNC 当前会话所需的密码，不会获得上游地址、端口或 API Token。VNC 密码只在短期服务端目标和当前浏览器会话内存中使用，不写入数据库、审计、日志、URL 或浏览器存储；本面板的会话到期不表示服务商已撤销或轮换该密码。生命周期及代理要求见 [console.md](console.md)。内嵌和新窗口共用此代理；VNC 被禁用或服务器挂起时两个入口禁用，服务商后台仍可打开。后台回退只打开连接的 HTTPS origin 根页面，不假设管理员/客户区共享深链路，也不附加 Token 或服务器查询参数。
+
+## 第三方 PVE 自研面板
+
+当前没有内置 PVE Provider。项目保留 [Provider SDK](provider-sdk.md)、契约测试和 `examples/providers/pvepanel` 示例；示例是可编译但未注册的假想协议，不兼容任何真实面板，也不调用 Proxmox VE 原生 API。每家服务商必须按自己的正式 API 文档实现独立适配器并编译发布。

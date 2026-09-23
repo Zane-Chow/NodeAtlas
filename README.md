@@ -1,6 +1,8 @@
 # Server Control Panel
 
-单用户、多服务商服务器控制面板。当前版本已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份，并已接入 Mock、AWS EC2、Google Cloud Compute Engine、VirtFusion 与 Virtualizor。
+单用户、多服务商服务器控制面板。当前版本已经提供安全初始化、登录、SQLite/MySQL 双数据库基础、多个服务商连接、统一服务器清单、安全电源操作、三级控制台回退和应用级加密备份，并已接入 Mock、AWS EC2、Google Cloud Compute Engine、VirtFusion、Virtualizor 与 SolusVM 2。
+
+四阶段开发已完成：界面与 Mock；AWS/VirtFusion；GCP/Virtualizor；SolusVM 2 与第三方 PVE 面板扩展入口。第三方 PVE 部分只交付编译期 Provider SDK、契约测试和未注册的示例骨架，没有内置 PVE Provider，也不直接连接 Proxmox VE 原生 API。真实账号的权限、网络和控制台兼容性仍需在部署环境验收。
 
 ## 当前功能
 
@@ -72,6 +74,8 @@ SQLite 与 MySQL 是部署时二选一，不会双写。跨数据库迁移必须
 AWS 连接使用一个静态 Access Key、Secret Access Key、可选 Session Token 和显式区域列表；不会读取宿主机环境变量、共享凭据文件或实例角色。VirtFusion 连接使用面板 HTTPS 地址和 Bearer Token，支持 API v1 清单、电源操作及 VirtFusion 6.1+ VNC。自托管面板若解析到私网地址，必须用 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 显式放行所需的最小网段。
 
 第三阶段新增 Google Cloud Compute Engine 与 Virtualizor。GCP 每个连接使用一份完整的服务账号 JSON 和显式项目 ID，支持跨区域清单、开机、关机、硬重置及 Google Cloud 官方资源页回退。Virtualizor 使用客户侧 Enduser API 的 API Key/API Password，支持清单、电源操作，以及通过本面板一次性 WebSocket 票据代理的内嵌或新窗口 VNC。详细权限、凭据保护、HTTPS 与私网放行要求见 [docs/providers.md](docs/providers.md)。
+
+第四阶段新增 SolusVM 2，通过 HTTPS management node 地址和独立 API Token 使用其 REST API v1；这里的 API v1 不代表兼容 SolusVM 1。支持服务器清单、开机、正常关机/重启，以及通过 management node WSS 和本面板一次性票据代理的内嵌/新窗口 VNC，不可用时可打开服务商后台。第三方 PVE 自研面板需要按各自协议实现独立适配器，接入方式见 [docs/provider-sdk.md](docs/provider-sdk.md)。
 
 ## 测试
 
