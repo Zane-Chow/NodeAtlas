@@ -9,6 +9,7 @@ import (
 
 	provideraws "controlpanel/internal/providers/aws"
 	providergcp "controlpanel/internal/providers/gcp"
+	providersolusvm2 "controlpanel/internal/providers/solusvm2"
 	providervirtfusion "controlpanel/internal/providers/virtfusion"
 	providervirtualizor "controlpanel/internal/providers/virtualizor"
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,7 @@ func TestHTTPConnectionActionsAndProviderTypes(t *testing.T) {
 	service, _, _, queue := newServiceFixture(t)
 	require.NoError(t, service.registry.Register("aws", provideraws.NewFactory()))
 	require.NoError(t, service.registry.Register("gcp", providergcp.NewFactory()))
+	require.NoError(t, service.registry.Register("solusvm2", providersolusvm2.NewFactory(providersolusvm2.FactoryOptions{})))
 	require.NoError(t, service.registry.Register("virtualizor", providervirtualizor.NewFactory(providervirtualizor.FactoryOptions{})))
 	require.NoError(t, service.registry.Register("virtfusion", providervirtfusion.NewFactory(providervirtfusion.FactoryOptions{})))
 	_, err := service.Create(t.Context(), CreateInput{
@@ -60,6 +62,7 @@ func TestHTTPConnectionActionsAndProviderTypes(t *testing.T) {
 			{"id":"aws","name":"AWS EC2"},
 			{"id":"gcp","name":"Google Cloud Compute Engine"},
 			{"id":"mock","name":"Mock Provider"},
+			{"id":"solusvm2","name":"SolusVM 2"},
 			{"id":"virtualizor","name":"Virtualizor"},
 			{"id":"virtfusion","name":"VirtFusion"}
 		]

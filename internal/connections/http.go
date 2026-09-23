@@ -32,7 +32,7 @@ func NewHTTPHandler(service *Service) http.Handler {
 
 func (handler *HTTPHandler) providerTypes(response http.ResponseWriter, _ *http.Request) {
 	providerTypes := handler.service.ProviderTypes()
-	order := map[string]int{"aws": 0, "gcp": 1, "mock": 2, "virtualizor": 3, "virtfusion": 4}
+	order := map[string]int{"aws": 0, "gcp": 1, "mock": 2, "solusvm2": 3, "virtualizor": 4, "virtfusion": 5}
 	sort.SliceStable(providerTypes, func(i, j int) bool {
 		left, leftKnown := order[providerTypes[i]]
 		right, rightKnown := order[providerTypes[j]]
@@ -53,6 +53,8 @@ func (handler *HTTPHandler) providerTypes(response http.ResponseWriter, _ *http.
 			name = "AWS EC2"
 		} else if providerType == "gcp" {
 			name = "Google Cloud Compute Engine"
+		} else if providerType == "solusvm2" {
+			name = "SolusVM 2"
 		} else if providerType == "virtualizor" {
 			name = "Virtualizor"
 		} else if providerType == "virtfusion" {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -15,6 +16,9 @@ import (
 	"controlpanel/internal/database"
 	"controlpanel/internal/inventory"
 	"controlpanel/internal/operations"
+	"controlpanel/internal/providers"
+	providersolusvm2 "controlpanel/internal/providers/solusvm2"
+	"controlpanel/internal/secrets"
 	"github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +43,7 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, unauthenticatedProviderTypes.Code)
 	require.NotContains(t, unauthenticatedProviderTypes.Body.String(), "gcp")
 	require.NotContains(t, unauthenticatedProviderTypes.Body.String(), "virtualizor")
+	require.NotContains(t, unauthenticatedProviderTypes.Body.String(), "solusvm2")
 
 	setup := httptest.NewRequest(http.MethodPost, "/api/v1/setup/initialize", bytes.NewBufferString(`{
 		"username":"admin","password":"correct horse battery staple"
@@ -62,6 +67,7 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 			{"id":"aws","name":"AWS EC2"},
 			{"id":"gcp","name":"Google Cloud Compute Engine"},
 			{"id":"mock","name":"Mock Provider"},
+			{"id":"solusvm2","name":"SolusVM 2"},
 			{"id":"virtualizor","name":"Virtualizor"},
 			{"id":"virtfusion","name":"VirtFusion"}
 		]
@@ -97,6 +103,85 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	require.Equal(t, "Lab A", stored[0].Name)
+}
+
+func TestComposeCreatesIndependentSolusVM2Connections(t *testing.T) {
+	temporary := t.TempDir()
+	key := bytes.Repeat([]byte{11}, 32)
+	cfg := config.Config{
+		Environment: "development",
+		HTTP:        config.HTTPConfig{Address: "127.0.0.1:0"},
+		Database:    config.DatabaseConfig{URL: "sqlite://" + filepath.Join(temporary, "solusvm2-app.db")},
+		Secrets:     config.SecretConfig{CredentialKeys: map[int][]byte{1: key}, ActiveKeyVersion: 1},
+		Backup:      config.BackupConfig{Directory: filepath.Join(temporary, "backups")},
+		Providers:   config.ProviderConfig{AllowedPrivateCIDRs: []string{"10.20.0.0/24"}},
+	}
+	db, dialect, err := database.Open(context.Background(), cfg.Database)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	require.NoError(t, database.Migrate(context.Background(), db, dialect))
+	handler, _, err := compose(db, dialect, cfg)
+	require.NoError(t, err)
+
+	setupResponse := httptest.NewRecorder()
+	handler.ServeHTTP(setupResponse, appRequest(http.MethodPost, "/api/v1/setup/initialize", `{"username":"admin","password":"correct horse battery staple"}`, nil))
+	require.Equal(t, http.StatusCreated, setupResponse.Code)
+	cookies := setupResponse.Result().Cookies()
+
+	type fixture struct {
+		name     string
+		endpoint string
+		token    string
+	}
+	fixtures := []fixture{
+		{name: "Solus Primary", endpoint: "https://10.20.0.10", token: "solus-token-primary"},
+		{name: "Solus Backup", endpoint: "https://10.20.0.11/api/v1", token: "solus-token-backup"},
+	}
+	createdIDs := make([]string, 0, len(fixtures))
+	for _, item := range fixtures {
+		response := httptest.NewRecorder()
+		body, marshalErr := json.Marshal(map[string]any{
+			"name": item.name, "provider_type": "solusvm2", "endpoint": item.endpoint,
+			"enabled": false, "settings": map[string]any{}, "credentials": map[string]any{"api_token": item.token},
+		})
+		require.NoError(t, marshalErr)
+		handler.ServeHTTP(response, appRequest(http.MethodPost, "/api/v1/connections", string(body), cookies))
+		require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+		require.NotContains(t, response.Body.String(), item.token)
+		var payload struct {
+			Connection connections.Connection `json:"connection"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+		require.Equal(t, "solusvm2", payload.Connection.ProviderType)
+		createdIDs = append(createdIDs, payload.Connection.ID)
+	}
+	require.NotEqual(t, createdIDs[0], createdIDs[1])
+
+	repository := connections.NewSQLRepository(db, dialect)
+	cipher, err := secrets.NewCredentialCipher(map[int][]byte{1: key}, 1)
+	require.NoError(t, err)
+	_, allowedCIDR, err := net.ParseCIDR("10.20.0.0/24")
+	require.NoError(t, err)
+	factory := providersolusvm2.NewFactory(providersolusvm2.FactoryOptions{AllowedPrivateCIDRs: []*net.IPNet{allowedCIDR}})
+	for index, connectionID := range createdIDs {
+		stored, encrypted, findErr := repository.FindByID(context.Background(), connectionID)
+		require.NoError(t, findErr)
+		require.Equal(t, "solusvm2", stored.ProviderType)
+		require.Equal(t, fixtures[index].endpoint, stored.Endpoint)
+		plaintext, decryptErr := cipher.Decrypt(stored.ID, stored.ProviderType, secrets.Envelope{
+			Ciphertext: encrypted.Ciphertext, Nonce: encrypted.Nonce, KeyVersion: encrypted.KeyVersion,
+		})
+		require.NoError(t, decryptErr)
+		require.JSONEq(t, `{"api_token":"`+fixtures[index].token+`"}`, string(plaintext))
+		provider, createErr := factory.Create(providers.ConnectionConfig{
+			ID: stored.ID, Type: stored.ProviderType, Endpoint: stored.Endpoint, Settings: stored.Settings, Credentials: plaintext,
+		})
+		clear(plaintext)
+		require.NoError(t, createErr)
+		portal, portalErr := provider.ProviderPortalURL(context.Background(), providers.ServerRef{ExternalID: "1"})
+		require.NoError(t, portalErr)
+		require.Equal(t, "https://"+strings.TrimPrefix(strings.Split(fixtures[index].endpoint, "/api/v1")[0], "https://")+"/", portal.String())
+	}
 }
 
 func TestPowerOperationFlowsThroughAuthenticatedApplication(t *testing.T) {
