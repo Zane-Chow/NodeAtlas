@@ -113,7 +113,7 @@ func normalizeLimits(limits Limits) Limits {
 func collectInventory(testing TestingT, ctx context.Context, provider providers.Provider, limits Limits) ([]providers.RemoteServer, bool) {
 	var cursor *providers.Cursor
 	seenCursors := make(map[string]struct{})
-	seenServers := make(map[string]struct{})
+	seenServers := make(map[serverIdentity]struct{})
 	servers := make([]providers.RemoteServer, 0)
 	for pageNumber := 1; pageNumber <= limits.MaxPages; pageNumber++ {
 		page, err := provider.ListServers(ctx, cursor)
@@ -175,7 +175,7 @@ func validateServer(testing TestingT, server providers.RemoteServer) {
 	if len(server.Addresses) == 0 || !json.Valid(server.Addresses) {
 		testing.Errorf("contract: server addresses must be valid JSON")
 	}
-	validateCapabilities(testing, server.Capabilities)
+	validateCapabilities(testing, server.State, server.Capabilities)
 }
 
 func canonicalState(state providers.ServerState) bool {
@@ -189,7 +189,7 @@ func canonicalState(state providers.ServerState) bool {
 	}
 }
 
-func validateCapabilities(testing TestingT, capabilities providers.Capabilities) {
+func validateCapabilities(testing TestingT, state providers.ServerState, capabilities providers.Capabilities) {
 	checks := []providers.Capability{
 		capabilities.CanStart,
 		capabilities.CanStop,
@@ -204,6 +204,28 @@ func validateCapabilities(testing TestingT, capabilities providers.Capabilities)
 		}
 		if !capability.Available && strings.TrimSpace(capability.Reason) == "" {
 			testing.Errorf("contract: unavailable capability requires a reason")
+		}
+	}
+
+	powerAvailable := capabilities.CanStart.Available || capabilities.CanStop.Available || capabilities.CanReboot.Available
+	consoleAvailable := capabilities.CanEmbedConsole.Available || capabilities.CanOpenConsoleWindow.Available
+	switch state {
+	case providers.StateRunning:
+		if capabilities.CanStart.Available {
+			testing.Errorf("contract: running server must not allow start")
+		}
+	case providers.StateStopped:
+		if capabilities.CanStop.Available || capabilities.CanReboot.Available {
+			testing.Errorf("contract: stopped server must not allow stop or reboot")
+		}
+	case providers.StateSuspended:
+		if powerAvailable || consoleAvailable {
+			testing.Errorf("contract: suspended server must not allow power or console operations")
+		}
+	case providers.StatePending, providers.StateStopping, providers.StateRebooting,
+		providers.StateUnknown, providers.StateError:
+		if powerAvailable {
+			testing.Errorf("contract: transitional or unsafe server state must not allow power operations")
 		}
 	}
 }
@@ -240,8 +262,13 @@ func validateErrorCase(testing TestingT, ctx context.Context, errorCase ErrorCas
 	}
 }
 
-func identity(server providers.RemoteServer) string {
-	return server.Scope + "\x00" + server.ExternalID
+type serverIdentity struct {
+	scope string
+	id    string
+}
+
+func identity(server providers.RemoteServer) serverIdentity {
+	return serverIdentity{scope: server.Scope, id: server.ExternalID}
 }
 
 func sameIdentities(left, right []providers.RemoteServer) bool {
@@ -258,11 +285,16 @@ func sameIdentities(left, right []providers.RemoteServer) bool {
 	return true
 }
 
-func identities(servers []providers.RemoteServer) []string {
-	result := make([]string, 0, len(servers))
+func identities(servers []providers.RemoteServer) []serverIdentity {
+	result := make([]serverIdentity, 0, len(servers))
 	for _, server := range servers {
 		result = append(result, identity(server))
 	}
-	sort.Strings(result)
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].scope == result[right].scope {
+			return result[left].id < result[right].id
+		}
+		return result[left].scope < result[right].scope
+	})
 	return result
 }

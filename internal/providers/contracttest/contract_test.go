@@ -87,6 +87,154 @@ func TestRunRejectsInvalidInventoryWithoutDumpingJSON(t *testing.T) {
 	require.Contains(t, recorder.messages(), "unavailable capability requires a reason")
 }
 
+func TestRunRejectsCapabilitiesInconsistentWithServerState(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  providers.ServerState
+		mutate func(*providers.Capabilities)
+		want   string
+	}{
+		{
+			name:  "running server cannot start",
+			state: providers.StateRunning,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStart = providers.Capability{Available: true}
+			},
+			want: "running server must not allow start",
+		},
+		{
+			name:  "stopped server cannot stop",
+			state: providers.StateStopped,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStop = providers.Capability{Available: true}
+			},
+			want: "stopped server must not allow stop or reboot",
+		},
+		{
+			name:  "stopped server cannot reboot",
+			state: providers.StateStopped,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanReboot = providers.Capability{Available: true}
+			},
+			want: "stopped server must not allow stop or reboot",
+		},
+		{
+			name:  "suspended server cannot use power",
+			state: providers.StateSuspended,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStart = providers.Capability{Available: true}
+			},
+			want: "suspended server must not allow power or console operations",
+		},
+		{
+			name:  "suspended server cannot use embedded console",
+			state: providers.StateSuspended,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanEmbedConsole = providers.Capability{Available: true}
+			},
+			want: "suspended server must not allow power or console operations",
+		},
+		{
+			name:  "suspended server cannot use window console",
+			state: providers.StateSuspended,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanOpenConsoleWindow = providers.Capability{Available: true}
+			},
+			want: "suspended server must not allow power or console operations",
+		},
+		{
+			name:  "pending server cannot use power",
+			state: providers.StatePending,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStop = providers.Capability{Available: true}
+			},
+			want: "transitional or unsafe server state must not allow power operations",
+		},
+		{
+			name:  "stopping server cannot use power",
+			state: providers.StateStopping,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanReboot = providers.Capability{Available: true}
+			},
+			want: "transitional or unsafe server state must not allow power operations",
+		},
+		{
+			name:  "rebooting server cannot use power",
+			state: providers.StateRebooting,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStart = providers.Capability{Available: true}
+			},
+			want: "transitional or unsafe server state must not allow power operations",
+		},
+		{
+			name:  "unknown server cannot use power",
+			state: providers.StateUnknown,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStart = providers.Capability{Available: true}
+			},
+			want: "transitional or unsafe server state must not allow power operations",
+		},
+		{
+			name:  "error server cannot use power",
+			state: providers.StateError,
+			mutate: func(capabilities *providers.Capabilities) {
+				capabilities.CanStop = providers.Capability{Available: true}
+			},
+			want: "transitional or unsafe server state must not allow power operations",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := &recordingT{}
+			item := server("one", "zone-a", test.state)
+			test.mutate(&item.Capabilities)
+			provider := &fixtureProvider{pages: map[string]providers.ServerPage{"": {Servers: []providers.RemoteServer{item}}}}
+
+			Run(recorder, Fixture{Provider: provider})
+
+			require.Contains(t, recorder.messages(), test.want)
+		})
+	}
+}
+
+func TestServerIdentityTupleCannotCollideOnNUL(t *testing.T) {
+	leftServer := server("\x00b", "a", providers.StateRunning)
+	rightServer := server("b", "a\x00", providers.StateStopped)
+	left := identity(leftServer)
+	right := identity(rightServer)
+
+	require.NotEqual(t, left, right)
+	identities := map[serverIdentity]struct{}{left: {}, right: {}}
+	require.Len(t, identities, 2)
+
+	recorder := &recordingT{}
+	provider := &fixtureProvider{pages: map[string]providers.ServerPage{"": {Servers: []providers.RemoteServer{leftServer, rightServer}}}}
+	Run(recorder, Fixture{Provider: provider})
+	require.False(t, recorder.failed, recorder.messages())
+}
+
+func TestRunAllowsConservativeCapabilitiesForStableStates(t *testing.T) {
+	running := server("running", "zone-a", providers.StateRunning)
+	stopped := server("stopped", "zone-a", providers.StateStopped)
+	for _, item := range []*providers.RemoteServer{&running, &stopped} {
+		item.Capabilities = providers.Capabilities{
+			CanStart:             providers.Capability{Reason: "provider does not expose start"},
+			CanStop:              providers.Capability{Reason: "provider does not expose stop"},
+			CanReboot:            providers.Capability{Reason: "provider does not expose reboot"},
+			CanEmbedConsole:      providers.Capability{Reason: "provider does not expose a console"},
+			CanOpenConsoleWindow: providers.Capability{Reason: "provider does not expose a console"},
+			HasProviderPortal:    providers.Capability{Reason: "provider does not expose a portal"},
+		}
+	}
+	recorder := &recordingT{}
+	provider := &fixtureProvider{pages: map[string]providers.ServerPage{"": {Servers: []providers.RemoteServer{running, stopped}}}}
+
+	Run(recorder, Fixture{Provider: provider})
+
+	require.False(t, recorder.failed, recorder.messages())
+}
+
 func TestRunEnforcesPageAndServerLimits(t *testing.T) {
 	t.Run("servers", func(t *testing.T) {
 		recorder := &recordingT{}
@@ -202,21 +350,29 @@ func (*fixtureProvider) ProviderPortalURL(context.Context, providers.ServerRef) 
 }
 
 func server(id, scope string, state providers.ServerState) providers.RemoteServer {
+	capabilities := providers.Capabilities{
+		CanStart:             providers.Capability{Reason: "server cannot start in this state"},
+		CanStop:              providers.Capability{Reason: "server cannot stop in this state"},
+		CanReboot:            providers.Capability{Reason: "server cannot reboot in this state"},
+		CanEmbedConsole:      providers.Capability{Reason: "not supported by fixture"},
+		CanOpenConsoleWindow: providers.Capability{Reason: "not supported by fixture"},
+		HasProviderPortal:    providers.Capability{Reason: "not supported by fixture"},
+	}
+	if state == providers.StateRunning {
+		capabilities.CanStop = providers.Capability{Available: true}
+		capabilities.CanReboot = providers.Capability{Available: true}
+	}
+	if state == providers.StateStopped {
+		capabilities.CanStart = providers.Capability{Available: true}
+	}
 	return providers.RemoteServer{
-		ExternalID:  id,
-		Scope:       scope,
-		Name:        "fixture-" + id,
-		State:       state,
-		RemoteState: string(state),
-		Spec:        json.RawMessage(`{"cpu":2}`),
-		Addresses:   json.RawMessage(`[]`),
-		Capabilities: providers.Capabilities{
-			CanStart:             providers.Capability{Available: true},
-			CanStop:              providers.Capability{Available: true},
-			CanReboot:            providers.Capability{Available: true},
-			CanEmbedConsole:      providers.Capability{Reason: "not supported by fixture"},
-			CanOpenConsoleWindow: providers.Capability{Reason: "not supported by fixture"},
-			HasProviderPortal:    providers.Capability{Reason: "not supported by fixture"},
-		},
+		ExternalID:   id,
+		Scope:        scope,
+		Name:         "fixture-" + id,
+		State:        state,
+		RemoteState:  string(state),
+		Spec:         json.RawMessage(`{"cpu":2}`),
+		Addresses:    json.RawMessage(`[]`),
+		Capabilities: capabilities,
 	}
 }
