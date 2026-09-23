@@ -221,3 +221,66 @@ it('keeps the Virtualizor provider portal available when both VNC modes are unav
   expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toHaveAttribute('title', 'Virtualizor VNC is unavailable for this server')
   expect(within(detail).getByRole('button', { name: '服务商后台' })).toBeEnabled()
 })
+
+it('opens a SolusVM 2 VNC session in the same-origin popout without upstream details', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  const session = {
+    session_id: 'solusvm2-session', ticket: 'one-use-ticket', expires_at: '2026-09-21T12:01:00Z',
+    protocol: 'rfb', credentials: { password: 'temporary-vnc-password' },
+  }
+  const popup = { postMessage: vi.fn(), close: vi.fn() } as unknown as Window
+  const open = vi.spyOn(window, 'open').mockReturnValue(popup)
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    calls.push({ url, init })
+    if (url.endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-solusvm2', name: 'SolusVM 2', provider_type: 'solusvm2', enabled: true }] }), { status: 200 })
+    if (url.endsWith('/console-sessions')) return new Response(JSON.stringify({ session }), { status: 201 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-solusvm2', connection_id: 'connection-solusvm2', external_id: '201', scope: 'project-a', name: 'solusvm2-01',
+      state: 'running', remote_state: 'started', spec: {}, addresses: [], capabilities: { can_open_console_window: { available: true }, has_provider_portal: { available: true } },
+      last_seen_at: '2026-09-21T12:00:00Z', last_state_checked_at: '2026-09-21T12:00:00Z', created_at: '2026-09-21T12:00:00Z', updated_at: '2026-09-21T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 solusvm2-01' }))
+  await userEvent.click(within(screen.getByRole('dialog', { name: '服务器详情' })).getByRole('button', { name: '新窗口控制台' }))
+  expect(open).toHaveBeenCalledWith('/console-popout', '_blank')
+  window.dispatchEvent(new MessageEvent('message', {
+    origin: window.location.origin, source: popup, data: { type: 'server-control:console-ready' },
+  }))
+
+  await waitFor(() => expect(calls.some(({ url, init }) => url.endsWith('/servers/server-solusvm2/console-sessions') && init?.method === 'POST')).toBe(true))
+  await waitFor(() => expect(popup.postMessage).toHaveBeenCalledWith({
+    type: 'server-control:console-session', serverName: 'solusvm2-01', session,
+  }, window.location.origin))
+  const postedJSON = JSON.stringify(vi.mocked(popup.postMessage).mock.calls[0][0])
+  expect(postedJSON).not.toContain('upstream')
+  expect(postedJSON).not.toContain('host')
+  expect(postedJSON).not.toContain('port')
+  expect(postedJSON).not.toContain('api_token')
+})
+
+it('keeps the SolusVM 2 provider portal available when both VNC modes are unavailable', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    if (String(input).endsWith('/connections')) return new Response(JSON.stringify({ connections: [{ id: 'connection-solusvm2', name: 'SolusVM 2', provider_type: 'solusvm2', enabled: true }] }), { status: 200 })
+    return new Response(JSON.stringify({ servers: [{
+      id: 'server-solusvm2', connection_id: 'connection-solusvm2', external_id: '202', scope: 'project-a', name: 'solusvm2-fallback',
+      state: 'running', remote_state: 'started', spec: {}, addresses: [], capabilities: {
+        can_embed_console: { available: false, reason: 'SolusVM 2 VNC is unavailable for this server' },
+        can_open_console_window: { available: false, reason: 'SolusVM 2 VNC is unavailable for this server' },
+        has_provider_portal: { available: true },
+      },
+      last_seen_at: '2026-09-21T12:00:00Z', last_state_checked_at: '2026-09-21T12:00:00Z', created_at: '2026-09-21T12:00:00Z', updated_at: '2026-09-21T12:00:00Z',
+    }], total: 1 }), { status: 200 })
+  })
+
+  render(<ServersPage />)
+  await userEvent.click(await screen.findByRole('button', { name: '查看 solusvm2-fallback' }))
+  const detail = screen.getByRole('dialog', { name: '服务器详情' })
+  expect(within(detail).getByRole('button', { name: '内嵌控制台' })).toBeDisabled()
+  expect(within(detail).getByRole('button', { name: '内嵌控制台' })).toHaveAttribute('title', 'SolusVM 2 VNC is unavailable for this server')
+  expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toBeDisabled()
+  expect(within(detail).getByRole('button', { name: '新窗口控制台' })).toHaveAttribute('title', 'SolusVM 2 VNC is unavailable for this server')
+  expect(within(detail).getByRole('button', { name: '服务商后台' })).toBeEnabled()
+})

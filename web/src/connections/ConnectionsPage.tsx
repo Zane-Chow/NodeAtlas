@@ -98,6 +98,8 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
   const [virtualizorEndpoint, setVirtualizorEndpoint] = useState('')
   const [virtualizorAPIKey, setVirtualizorAPIKey] = useState('')
   const [virtualizorAPIPassword, setVirtualizorAPIPassword] = useState('')
+  const [solusVM2Endpoint, setSolusVM2Endpoint] = useState('')
+  const [solusVM2APIToken, setSolusVM2APIToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
@@ -123,6 +125,9 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       } else if (providerType === 'virtualizor') {
         await onSubmit({ name, provider_type: 'virtualizor', endpoint: virtualizorEndpoint.trim(), enabled: true,
           settings: {}, credentials: { api_key: virtualizorAPIKey, api_password: virtualizorAPIPassword } })
+      } else if (providerType === 'solusvm2') {
+        await onSubmit({ name, provider_type: 'solusvm2', endpoint: solusVM2Endpoint.trim(), enabled: true,
+          settings: {}, credentials: { api_token: solusVM2APIToken } })
       } else {
         await onSubmit({ name, provider_type: 'mock', endpoint: '', enabled: true,
           settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
@@ -151,6 +156,10 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       <label htmlFor="virtualizor-endpoint">Virtualizor 面板地址</label><input id="virtualizor-endpoint" type="url" value={virtualizorEndpoint} onChange={(event) => setVirtualizorEndpoint(event.target.value)} placeholder="https://panel.example.com:4083" required />
       <label htmlFor="virtualizor-api-key">Virtualizor API Key</label><input id="virtualizor-api-key" type="password" value={virtualizorAPIKey} onChange={(event) => setVirtualizorAPIKey(event.target.value)} required autoComplete="new-password" />
       <label htmlFor="virtualizor-api-password">Virtualizor API Password</label><input id="virtualizor-api-password" type="password" value={virtualizorAPIPassword} onChange={(event) => setVirtualizorAPIPassword(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
+    </> : providerType === 'solusvm2' ? <>
+      <label htmlFor="solusvm2-endpoint">SolusVM 2 面板地址</label><input id="solusvm2-endpoint" type="url" value={solusVM2Endpoint} onChange={(event) => setSolusVM2Endpoint(event.target.value)} placeholder="https://panel.example.com" required />
+      <label htmlFor="solusvm2-api-token">SolusVM 2 API Token</label><input id="solusvm2-api-token" type="password" value={solusVM2APIToken} onChange={(event) => setSolusVM2APIToken(event.target.value)} required autoComplete="new-password" />
       <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
     </> : <>
       <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />

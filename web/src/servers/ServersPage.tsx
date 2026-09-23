@@ -14,7 +14,7 @@ const stateLabels: Record<string, string> = { running: '运行中', stopped: '�
 const actionLabels: Record<PowerAction, string> = { start: '开机', stop: '关机', reboot: '重启' }
 
 function usesLocalVNCWindow(providerType: string | undefined) {
-  return providerType === 'virtfusion' || providerType === 'virtualizor'
+  return providerType === 'virtfusion' || providerType === 'virtualizor' || providerType === 'solusvm2'
 }
 
 export function ServersPage() {

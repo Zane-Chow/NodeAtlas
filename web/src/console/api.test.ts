@@ -41,4 +41,12 @@ it('hands an RFB session to a same-origin popout without putting secrets in its 
     },
   }, window.location.origin)
   expect(Object.keys(vi.mocked(popup.postMessage).mock.calls[0][0] as object)).toEqual(['type', 'serverName', 'session'])
+  const postedJSON = JSON.stringify(vi.mocked(popup.postMessage).mock.calls[0][0])
+  expect(postedJSON).not.toContain('upstream')
+  expect(postedJSON).not.toContain('host')
+  expect(postedJSON).not.toContain('port')
+  expect(postedJSON).not.toContain('api_token')
+  expect(Object.keys((vi.mocked(popup.postMessage).mock.calls[0][0] as { session: object }).session)).toEqual([
+    'session_id', 'ticket', 'expires_at', 'protocol', 'credentials',
+  ])
 })

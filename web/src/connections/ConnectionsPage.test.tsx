@@ -215,6 +215,43 @@ it('creates a Virtualizor connection with write-only API credentials', async () 
   expect(screen.queryByText('write-only-api-password')).not.toBeInTheDocument()
 })
 
+it('creates a SolusVM 2 connection with a write-only API token', async () => {
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'solusvm2', name: 'SolusVM 2' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'solusvm2-a', name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test', settings: {},
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-21T12:00:00Z', updated_at: '2026-09-21T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.type(screen.getByLabelText('连接名称'), 'SolusVM 2 主节点')
+  await userEvent.type(screen.getByLabelText('SolusVM 2 面板地址'), '  https://panel.example.test  ')
+  const token = screen.getByLabelText('SolusVM 2 API Token')
+  expect(token).toHaveAttribute('type', 'password')
+  expect(token).toHaveAttribute('autocomplete', 'new-password')
+  await userEvent.type(token, 'write-only-solusvm2-token')
+  expect(screen.getByText('面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。')).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toEqual({
+    name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test', enabled: true,
+    settings: {}, credentials: { api_token: 'write-only-solusvm2-token' },
+  }))
+  expect(screen.queryByRole('form', { name: '添加服务商' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('SolusVM 2 API Token')).not.toBeInTheDocument()
+  expect(screen.queryByText('write-only-solusvm2-token')).not.toBeInTheDocument()
+})
+
 it('tests and synchronizes a connection', async () => {
   const calls: string[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
