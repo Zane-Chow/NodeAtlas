@@ -411,7 +411,7 @@ func (provider *Provider) request(ctx context.Context, method, relativePath stri
 	}
 	request.Header.Set("Authorization", "Bearer "+provider.token)
 	request.Header.Set("Accept", "application/json")
-	if body != nil {
+	if body != nil || method == http.MethodPost {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	response, err := provider.client.Do(request)

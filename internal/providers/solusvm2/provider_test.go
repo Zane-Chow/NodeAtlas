@@ -311,10 +311,10 @@ func TestPowerRequestsAndReceipts(t *testing.T) {
 				require.Empty(t, r.URL.RawQuery)
 				raw, err := io.ReadAll(r.Body)
 				require.NoError(t, err)
+				require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 				if action == "start" {
 					require.Empty(t, raw)
 				} else {
-					require.Equal(t, "application/json", r.Header.Get("Content-Type"))
 					require.JSONEq(t, `{"force":false}`, string(raw))
 				}
 				writeJSON(t, w, map[string]any{"data": map[string]any{"id": 987, "output": "body-secret"}})
