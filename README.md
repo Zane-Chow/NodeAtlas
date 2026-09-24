@@ -15,7 +15,7 @@
 - 根据能力支持面板内嵌控制台、新窗口临时控制台和服务商后台三级回退。
 - 支持创建、下载、校验和恢复应用级加密备份；恢复前自动创建安全快照。
 
-电源操作、控制台、服务商接入和备份运维要求分别见 [docs/operations.md](docs/operations.md)、[docs/console.md](docs/console.md)、[docs/providers.md](docs/providers.md) 和 [docs/backups.md](docs/backups.md)。
+完整部署步骤见 [docs/deployment.md](docs/deployment.md)。电源操作、控制台、服务商接入和备份运维要求分别见 [docs/operations.md](docs/operations.md)、[docs/console.md](docs/console.md)、[docs/providers.md](docs/providers.md) 和 [docs/backups.md](docs/backups.md)。
 
 ## 单文件运行
 
@@ -34,6 +34,8 @@ DATABASE_URL=sqlite://data/controlpanel.db PUBLIC_ORIGIN=http://127.0.0.1:8080 .
 ## Docker Compose
 
 复制 `.env.example` 为 `.env`，替换所有示例密码并设置真实的 HTTPS `PUBLIC_ORIGIN`。使用 `openssl rand -base64 32` 生成 32 字节凭据加密密钥，填入 `CREDENTIAL_KEYS` 的版本前缀后面，例如 `1:<生成值>`。请把这把密钥与数据库一同备份；丢失后已保存的服务商凭据无法恢复。
+
+推荐在 `.env` 中设置 `PANEL_PORT=127.0.0.1:8080`，只通过 HTTPS 反向代理对外提供服务。包含 Caddy、Nginx、systemd、升级、备份和排障步骤的生产部署说明见 [docs/deployment.md](docs/deployment.md)。
 
 MySQL：
 
