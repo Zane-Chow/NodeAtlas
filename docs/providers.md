@@ -78,7 +78,9 @@ Virtualizor 协议要求 `apikey` 与 `apipass` 出现在发往上游的查询�
 
 这些是 API 操作路径，不是 Token scope 名称；可选权限粒度取决于服务商版本和账号配置。连接测试只验证列表读取成功，不能证明所有电源和 VNC 权限均已授予。API Token 只用于后端 Bearer 认证，加密入库，保存后不回显。不要将其写入源码、镜像、日志或浏览器存储；轮换后先验证新 Token 可用，再撤销旧 Token。
 
-API 与控制台均要求有效的 TLS 证书，不支持跳过证书校验。私网 management node 及 `vnc_up` 返回的私网 compute host 必须通过 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行最小必要网段。若 management node 的 WSS 地址位于私网，还必须在 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 中放行该管理节点网段。保存、DNS 解析、实际拨号均执行地址策略；API 只允许同源 HTTPS 重定向，WSS 连接拒绝重定向。
+API 与控制台均要求有效的 TLS 证书，不支持跳过证书校验。保存、DNS 解析、实际拨号均执行地址策略；API 只允许同源 HTTPS 重定向，WSS 连接拒绝重定向。
+
+私网 management node 及 `vnc_up` 返回的私网 compute host 必须通过 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行。中央 console 策略使用 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 与 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的并集，因此 provider 放行已同时允许同一网段的 WSS/HTTPS 控制台目标，无需在两处重复配置。`CONSOLE_ALLOWED_PRIVATE_CIDRS` 用于额外仅供控制台使用的网段，不会授予 provider API 或 compute host 访问权限。provider 放行也会扩大中央 console 的允许范围，两项配置都应限定为最小必要网段。
 
 关机和重启显式发送 `{"force":false}`，不请求强制断电或强制复位；来宾系统仍须能够响应服务商的正常关机机制。操作完成由后续状态查询确认。挂起服务器不提供电源或 VNC 操作。
 

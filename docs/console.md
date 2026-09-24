@@ -13,7 +13,7 @@
 - 内嵌代理接受经过校验的 `wss`；后端还可为 Virtualizor 原始 VNC 创建内部专用的 `vnc+tcp` 目标。`vnc+tcp` 只允许用于已识别为 Virtualizor 的连接，且同样执行主机、端口、DNS 和私网 CIDR 策略校验；它不会作为 URL 返回浏览器。Mock Provider 使用不访问网络的进程内测试传输。
 - 新窗口与服务商后台仅接受 `https`。
 - 拒绝 URL userinfo、fragment、无主机目标、loopback、链路本地、多播、未指定地址、云元数据地址和未授权私网地址。
-- 私有 `wss` 控制端必须通过 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 显式加入逗号分隔的 RFC1918/ULA CIDR 允许列表；Virtualizor 的私有原始 VNC 目标使用 `PROVIDER_ALLOWED_PRIVATE_CIDRS`。例如 `10.20.0.0/16,fd00::/8`；不要加入不必要的宽泛网段。
+- 中央 console 策略使用 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 与 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的并集。为自托管 provider 放行的网段也会允许同网段的 WSS/HTTPS 控制台目标，无需在两处重复配置；`CONSOLE_ALLOWED_PRIVATE_CIDRS` 用于额外仅供控制台使用的网段，不会扩大 provider API 的权限。Virtualizor 的私有原始 VNC 目标仍需通过 provider 自身的 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 校验。两项配置接受逗号分隔的 RFC1918/ULA CIDR；provider 放行也会扩大中央 console 的允许范围，务必限定为最小必要网段。
 
 WSS 在创建票据和实际连接时都会执行目标校验，拨号时重新解析并检查全部 DNS 结果，只连接允许的 IP，同时保留原主机名用于 TLS 证书校验与 SNI。WSS 不使用环境代理，不跳过 TLS 校验，也不跟随重定向；服务商必须返回实际可连接的 WSS 端点。
 
@@ -23,7 +23,7 @@ WSS 在创建票据和实际连接时都会执行目标校验，拨号时重新�
 
 SolusVM 2 使用配置的 management node origin 上的 WSS `/vnc` 代理，内嵌和新窗口均复用本地 noVNC 与一次性票据。后端从 `vnc_up` 响应中严格校验 compute host、端口、VM 身份和密码；compute host 的所有 DNS 结果均须通过 provider 网络策略，再选定允许的字面 IP 构造上游目标，避免管理节点二次解析主机名。多地址选择排序后的第一个 IP，不自动切换地址。上游 URL 只在服务端内存中存在，API Token 和 VNC 密码都不放入其查询参数。
 
-私网 API management node 和 compute host 使用 `PROVIDER_ALLOWED_PRIVATE_CIDRS`；私网 management node WSS 还需通过 `CONSOLE_ALLOWED_PRIVATE_CIDRS`。SolusVM 2 不使用也不允许 `vnc+tcp`，不依赖 `vnc_proxy_url`，不能用上游响应覆盖已验证的面板 origin。
+私网 API management node 和 compute host 使用 `PROVIDER_ALLOWED_PRIVATE_CIDRS`；该列表已并入中央 console 策略，同网段的 management node WSS 无需再配置 `CONSOLE_ALLOWED_PRIVATE_CIDRS`。仅在 console 列表放行不能替代 provider 对 API 和 compute host 的校验。SolusVM 2 不使用也不允许 `vnc+tcp`，不依赖 `vnc_proxy_url`，不能用上游响应覆盖已验证的面板 origin。
 
 VNC 密码只通过已认证的会话创建响应交给当前浏览器控制台，在内存中供 noVNC 使用，不落盘、不进入日志或浏览器存储。60 秒票据期限与 5 分钟空闲/30 分钟最长会话限制由本应用执行；上游密码由服务商管理，本应用不承诺在相同期限内撤销或轮换它。VNC 不可用时仍可打开连接的 HTTPS origin 根页面；后台链接没有凭据，也不假设特定版本的服务器深链路。
 

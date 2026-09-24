@@ -80,7 +80,9 @@ Provider 只把经过挑选的安全字段映射为 `RemoteServer`。ID 与 scop
 
 WSS 目标必须从已信任 endpoint 与严格校验的响应字段构造，并继续经过中央 console target policy；不能盲信上游提供的任意 WebSocket origin。`vnc+tcp` 是高信任能力，新 Provider 默认不能使用。只有完成专门安全审查、证明每个目标经过网络策略后，才能在中央 allowlist 中加入**精确 Provider ID**；相似前后缀和大小写变体不能自动继承权限。
 
-中央 WSS 拨号会重新解析并检查全部 DNS 结果、固定允许 IP、保留原主机名的 TLS 校验，并拒绝重定向和环境代理。私网 WSS endpoint 必须通过 `CONSOLE_ALLOWED_PRIVATE_CIDRS`；它与 API/原始 VNC 使用的 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 是不同的策略。如果 WSS 网关还会根据查询参数连接另一个 compute host，适配器也必须单独校验该 host，并将允许的 IP 固定到转发目标中；只校验外层 WSS origin 不能保护第二跳。SolusVM 2 的实现展示了此边界，但不能直接视为其他面板的通用协议。
+中央 WSS 拨号会重新解析并检查全部 DNS 结果、固定允许 IP、保留原主机名的 TLS 校验，并拒绝重定向和环境代理。中央 console 策略使用 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 与 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的并集；provider 放行已同时允许同网段的 WSS/HTTPS 控制台目标，无需重复配置。`CONSOLE_ALLOWED_PRIVATE_CIDRS` 用于额外仅供控制台使用的网段，不会反向授予 provider API 或原始 VNC 目标的访问权限。provider 放行会扩大中央 console 的允许范围，两项配置都应限定为最小必要网段。
+
+如果 WSS 网关还会根据查询参数连接另一个 compute host，适配器也必须单独校验该 host，并将允许的 IP 固定到转发目标中；只校验外层 WSS origin 不能保护第二跳。SolusVM 2 的实现展示了此边界，但不能直接视为其他面板的通用协议。
 
 若控制台不可用，内嵌和新窗口按钮都应禁用，但安全的服务商后台入口可继续启用。不要通过前端字段或厂商深链路绕过后端票据和回退规则。
 
