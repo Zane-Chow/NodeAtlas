@@ -62,9 +62,9 @@ export function AppShell({ user, onLogout }: { user: AuthUser; onLogout(): Promi
 
 function Dashboard() {
   return <section className="content-grid">
-    <article className="welcome-card"><p className="eyebrow">阶段二 · 真实服务商接入</p><h2>统一管理多个服务商的服务器</h2><p>AWS EC2 与 VirtFusion 已接入真实 API，支持多账户清单、电源操作和安全控制台回退。</p><div className="progress-track"><span style={{ width: '100%' }} /></div></article>
-    <article className="status-card"><span className="status-icon">PV</span><div><small>Provider 核心</small><strong>AWS 与 VirtFusion 已接入</strong><p>凭据隔离、跨区域同步与 noVNC 控制台</p></div></article>
+    <article className="welcome-card"><p className="eyebrow">四阶段 · 计划已完成</p><h2>统一管理多个服务商的服务器</h2><p>AWS、GCP、VirtFusion、Virtualizor 与 SolusVM 2 均已接入真实 API，支持多账户清单、电源操作和安全控制台回退。</p><div className="progress-track"><span style={{ width: '100%' }} /></div></article>
+    <article className="status-card"><span className="status-icon">PV</span><div><small>Provider 核心</small><strong>五个服务商均已接入</strong><p>AWS · GCP · VirtFusion · Virtualizor · SolusVM 2</p></div></article>
     <article className="status-card"><span className="status-icon">BK</span><div><small>数据安全</small><strong>SQLite / MySQL 可迁移</strong><p>加密归档、校验、恢复与安全快照</p></div></article>
-    <article className="next-card"><span className="step-number">03</span><div><small>下一阶段</small><h3>GCP 与 Virtualizor</h3><p>继续扩展统一 Provider 接口与真实服务商 API。</p></div></article>
+    <article className="next-card"><span className="step-number">SDK</span><div><small>扩展入口</small><h3>第三方 PVE 自研面板</h3><p>已保留 Provider SDK、契约测试和示例骨架，可按服务商协议实现独立适配器。</p></div></article>
   </section>
 }
