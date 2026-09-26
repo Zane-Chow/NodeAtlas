@@ -3,7 +3,6 @@ package virtfusion
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,9 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"controlpanel/internal/providers"
 	providernetwork "controlpanel/internal/providers/network"
@@ -38,11 +38,13 @@ type Provider struct {
 	apiBase   *url.URL
 	portalURL *url.URL
 	token     string
-	pageSize  int
 	client    *http.Client
 }
 
 type settings struct {
+	// PageSize is retained only so connections created by releases that used
+	// the Global/Admin API can still be loaded and migrated. The User API does
+	// not expose the old paginated /servers endpoint.
 	PageSize int `json:"page_size,omitempty"`
 }
 
@@ -50,16 +52,8 @@ type credentials struct {
 	Token string `json:"token"`
 }
 
-type pageCursor struct {
-	Page int `json:"page"`
-}
-
 type listResponse struct {
-	CurrentPage int `json:"current_page"`
-	LastPage    int `json:"last_page"`
-	Data        []struct {
-		ID json.Number `json:"id"`
-	} `json:"data"`
+	Data json.RawMessage `json:"data"`
 }
 
 type detailResponse struct {
@@ -67,15 +61,31 @@ type detailResponse struct {
 }
 
 type serverData struct {
-	ID               json.Number     `json:"id"`
+	UUID             string          `json:"uuid"`
 	Name             string          `json:"name"`
-	HypervisorID     json.Number     `json:"hypervisorId"`
+	Hostname         string          `json:"hostname"`
 	State            string          `json:"state"`
+	Commissioned     *bool           `json:"commissioned"`
 	CommissionStatus int             `json:"commissionStatus"`
 	Suspended        bool            `json:"suspended"`
+	Locked           bool            `json:"locked"`
 	BuildFailed      bool            `json:"buildFailed"`
+	BuildFailedAlt   bool            `json:"build_failed"`
 	RemoteState      json.RawMessage `json:"remoteState"`
-	Settings         struct {
+	RemoteStateAlt   json.RawMessage `json:"remote_state"`
+	Memory           int             `json:"memory"`
+	Storage          int             `json:"storage"`
+	Traffic          int             `json:"traffic"`
+	CPUCores         int             `json:"cpu_cores"`
+	CPUCoresCamel    int             `json:"cpuCores"`
+	Resources        struct {
+		Memory        int `json:"memory"`
+		Storage       int `json:"storage"`
+		Traffic       int `json:"traffic"`
+		CPUCores      int `json:"cpu_cores"`
+		CPUCoresCamel int `json:"cpuCores"`
+	} `json:"resources"`
+	Settings struct {
 		Resources struct {
 			Memory   int `json:"memory"`
 			Storage  int `json:"storage"`
@@ -83,9 +93,6 @@ type serverData struct {
 			CPUCores int `json:"cpuCores"`
 		} `json:"resources"`
 	} `json:"settings"`
-	VNC *struct {
-		Enabled bool `json:"enabled"`
-	} `json:"vnc"`
 	Network struct {
 		Interfaces []struct {
 			IPv4 []struct {
@@ -100,7 +107,9 @@ type serverData struct {
 
 type actionResponse struct {
 	Data struct {
-		QueueID json.Number `json:"queueId"`
+		QueueID json.RawMessage `json:"queueId"`
+		TaskID  json.RawMessage `json:"taskId"`
+		ID      json.RawMessage `json:"id"`
 	} `json:"data"`
 }
 
@@ -112,6 +121,11 @@ type vncResponse struct {
 				URL string `json:"url"`
 			} `json:"wss"`
 		} `json:"vnc"`
+		Password string `json:"password"`
+		URL      string `json:"url"`
+		WSS      struct {
+			URL string `json:"url"`
+		} `json:"wss"`
 	} `json:"data"`
 }
 
@@ -137,11 +151,8 @@ func (factory *Factory) Create(config providers.ConnectionConfig) (providers.Pro
 	if err := decodeStrict(config.Settings, &configuration); err != nil {
 		return nil, errors.New("invalid VirtFusion settings")
 	}
-	if configuration.PageSize == 0 {
-		configuration.PageSize = 200
-	}
-	if configuration.PageSize < 1 || configuration.PageSize > 200 {
-		return nil, errors.New("VirtFusion page_size must be between 1 and 200")
+	if configuration.PageSize < 0 || configuration.PageSize > 200 {
+		return nil, errors.New("VirtFusion legacy page_size must be between 0 and 200")
 	}
 	var secret credentials
 	if err := decodeStrict(config.Credentials, &secret); err != nil || strings.TrimSpace(secret.Token) == "" {
@@ -163,32 +174,31 @@ func (factory *Factory) Create(config providers.ConnectionConfig) (providers.Pro
 	client := providernetwork.NewHTTPClient(policy, portalURL, providernetwork.HTTPOptions{
 		AllowHTTP: factory.options.allowHTTP,
 	})
-	return &Provider{apiBase: apiBase, portalURL: portalURL, token: strings.TrimSpace(secret.Token), pageSize: configuration.PageSize, client: client}, nil
+	return &Provider{apiBase: apiBase, portalURL: portalURL, token: strings.TrimSpace(secret.Token), client: client}, nil
 }
 
 func (provider *Provider) ValidateConnection(ctx context.Context) (providers.ConnectionInfo, error) {
-	if err := provider.request(ctx, http.MethodGet, "/connect", nil, nil); err != nil {
+	if err := provider.request(ctx, http.MethodGet, "/account", nil, nil); err != nil {
 		return providers.ConnectionInfo{}, err
 	}
-	return providers.ConnectionInfo{DisplayName: "VirtFusion", Version: "API v1"}, nil
+	return providers.ConnectionInfo{DisplayName: "VirtFusion", Version: "User API"}, nil
 }
 
 func (provider *Provider) ListServers(ctx context.Context, cursor *providers.Cursor) (providers.ServerPage, error) {
-	page, err := decodeCursor(cursor)
-	if err != nil {
+	if cursor != nil {
 		return providers.ServerPage{}, &providers.Error{Code: providers.ErrorInvalidConfig, Message: "invalid VirtFusion inventory cursor"}
 	}
-	query := url.Values{"type": {"simple"}, "results": {strconv.Itoa(provider.pageSize)}, "page": {strconv.Itoa(page)}}
 	var listed listResponse
-	if err := provider.request(ctx, http.MethodGet, "/servers?"+query.Encode(), nil, &listed); err != nil {
+	if err := provider.request(ctx, http.MethodGet, "/server", nil, &listed); err != nil {
 		return providers.ServerPage{}, err
 	}
-	if listed.CurrentPage != page || listed.LastPage < listed.CurrentPage || listed.LastPage < 1 || listed.LastPage > 1_000_000 || (listed.CurrentPage < listed.LastPage && len(listed.Data) == 0) {
-		return providers.ServerPage{}, &providers.Error{Code: providers.ErrorProvider, Message: "VirtFusion returned invalid pagination data"}
+	servers, err := decodeServerList(listed.Data)
+	if err != nil {
+		return providers.ServerPage{}, &providers.Error{Code: providers.ErrorProvider, Message: "VirtFusion returned invalid server inventory"}
 	}
-	result := providers.ServerPage{Servers: make([]providers.RemoteServer, 0, len(listed.Data))}
-	for _, item := range listed.Data {
-		id, err := normalizeServerID(item.ID.String())
+	result := providers.ServerPage{Servers: make([]providers.RemoteServer, 0, len(servers))}
+	for _, item := range servers {
+		id, err := normalizeServerID(item.UUID)
 		if err != nil {
 			return providers.ServerPage{}, &providers.Error{Code: providers.ErrorProvider, Message: "VirtFusion returned an invalid server ID"}
 		}
@@ -197,9 +207,6 @@ func (provider *Provider) ListServers(ctx context.Context, cursor *providers.Cur
 			return providers.ServerPage{}, err
 		}
 		result.Servers = append(result.Servers, server)
-	}
-	if page < listed.LastPage {
-		result.Next = &providers.Cursor{Value: encodeCursor(page + 1)}
 	}
 	return result, nil
 }
@@ -214,10 +221,11 @@ func (provider *Provider) GetServer(ctx context.Context, ref providers.ServerRef
 
 func (provider *Provider) getServer(ctx context.Context, id string) (providers.RemoteServer, error) {
 	var response detailResponse
-	if err := provider.request(ctx, http.MethodGet, "/servers/"+id+"?remoteState=true", nil, &response); err != nil {
+	if err := provider.request(ctx, http.MethodGet, "/server/"+id, nil, &response); err != nil {
 		return providers.RemoteServer{}, err
 	}
-	if _, err := normalizeServerID(response.Data.ID.String()); err != nil || response.Data.ID.String() != id {
+	responseID, err := normalizeServerID(response.Data.UUID)
+	if err != nil || responseID != id {
 		return providers.RemoteServer{}, &providers.Error{Code: providers.ErrorProvider, Message: "VirtFusion returned mismatched server data"}
 	}
 	return normalizeServer(response.Data), nil
@@ -241,10 +249,10 @@ func (provider *Provider) power(ctx context.Context, ref providers.ServerRef, ac
 		return providers.ActionReceipt{}, &providers.Error{Code: providers.ErrorNotFound, Message: "VirtFusion server was not found"}
 	}
 	var response actionResponse
-	if err := provider.request(ctx, http.MethodPost, "/servers/"+id+"/power/"+action, nil, &response); err != nil {
+	if err := provider.request(ctx, http.MethodPost, "/server/"+id+"/power/"+action, nil, &response); err != nil {
 		return providers.ActionReceipt{}, err
 	}
-	return providers.ActionReceipt{RequestID: response.Data.QueueID.String()}, nil
+	return providers.ActionReceipt{RequestID: firstScalar(response.Data.QueueID, response.Data.TaskID, response.Data.ID)}, nil
 }
 
 func (provider *Provider) OpenConsole(ctx context.Context, ref providers.ServerRef, mode providers.ConsoleMode) (providers.ConsoleTarget, error) {
@@ -256,18 +264,25 @@ func (provider *Provider) OpenConsole(ctx context.Context, ref providers.ServerR
 		return providers.ConsoleTarget{}, &providers.Error{Code: providers.ErrorNotFound, Message: "VirtFusion server was not found"}
 	}
 	var response vncResponse
-	if err := provider.request(ctx, http.MethodGet, "/servers/"+id+"/vnc", nil, &response); err != nil {
+	if err := provider.request(ctx, http.MethodGet, "/server/"+id+"/vnc", nil, &response); err != nil {
 		return providers.ConsoleTarget{}, err
 	}
-	target, err := provider.resolveVNC(response.Data.VNC.WSS.URL)
+	vncURL := firstNonEmpty(response.Data.VNC.WSS.URL, response.Data.WSS.URL, response.Data.URL)
+	password := firstNonEmpty(response.Data.VNC.Password, response.Data.Password)
+	target, err := provider.resolveVNC(vncURL)
 	if err != nil {
 		return providers.ConsoleTarget{}, err
 	}
-	return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", URL: target, Password: response.Data.VNC.Password}, nil
+	return providers.ConsoleTarget{Mode: mode, Protocol: "rfb", URL: target, Password: password}, nil
 }
 
-func (provider *Provider) ProviderPortalURL(context.Context, providers.ServerRef) (*url.URL, error) {
+func (provider *Provider) ProviderPortalURL(_ context.Context, ref providers.ServerRef) (*url.URL, error) {
+	id, err := normalizeServerID(ref.ExternalID)
+	if err != nil {
+		return nil, &providers.Error{Code: providers.ErrorNotFound, Message: "VirtFusion server was not found"}
+	}
 	copy := *provider.portalURL
+	copy.Path = path.Join(copy.Path, "server", id)
 	return &copy, nil
 }
 
@@ -298,18 +313,31 @@ func (provider *Provider) resolveVNC(raw string) (*url.URL, error) {
 }
 
 func normalizeServer(data serverData) providers.RemoteServer {
-	id := data.ID.String()
+	id := data.UUID
 	name := strings.TrimSpace(data.Name)
+	if name == "" {
+		name = strings.TrimSpace(data.Hostname)
+	}
 	if name == "" {
 		name = "VirtFusion server " + id
 	}
 	remoteState := decodeRemoteState(data.RemoteState)
+	if remoteState == "unknown" {
+		remoteState = decodeRemoteState(data.RemoteStateAlt)
+	}
+	if remoteState == "unknown" && !strings.EqualFold(strings.TrimSpace(data.State), "complete") {
+		remoteState = strings.ToLower(strings.TrimSpace(data.State))
+	}
 	state := mapState(remoteState, data)
+	memory := firstPositive(data.Memory, data.Resources.Memory, data.Settings.Resources.Memory)
+	storage := firstPositive(data.Storage, data.Resources.Storage, data.Settings.Resources.Storage)
+	traffic := firstPositive(data.Traffic, data.Resources.Traffic, data.Settings.Resources.Traffic)
+	cpu := firstPositive(data.CPUCores, data.CPUCoresCamel, data.Resources.CPUCores, data.Resources.CPUCoresCamel, data.Settings.Resources.CPUCores)
 	spec, _ := json.Marshal(map[string]int{
-		"memory_mb":  data.Settings.Resources.Memory,
-		"storage_gb": data.Settings.Resources.Storage,
-		"traffic_gb": data.Settings.Resources.Traffic,
-		"cpu":        data.Settings.Resources.CPUCores,
+		"memory_mb":  memory,
+		"storage_gb": storage,
+		"traffic_gb": traffic,
+		"cpu":        cpu,
 	})
 	addresses := make([]map[string]string, 0)
 	for _, networkInterface := range data.Network.Interfaces {
@@ -325,7 +353,9 @@ func normalizeServer(data serverData) providers.RemoteServer {
 		}
 	}
 	encodedAddresses, _ := json.Marshal(addresses)
-	vncAvailable := data.VNC != nil && !data.Suspended && !data.BuildFailed && data.CommissionStatus >= 3
+	buildFailed := data.BuildFailed || data.BuildFailedAlt
+	commissioned := data.Commissioned == nil || *data.Commissioned
+	vncAvailable := commissioned && !data.Suspended && !data.Locked && !buildFailed
 	capabilities := providers.Capabilities{
 		CanStart:             capability(state == providers.StateStopped, "server must be stopped"),
 		CanStop:              capability(state == providers.StateRunning, "server must be running"),
@@ -334,7 +364,7 @@ func normalizeServer(data serverData) providers.RemoteServer {
 		CanOpenConsoleWindow: capability(vncAvailable, "VirtFusion VNC is unavailable for this server"),
 		HasProviderPortal:    providers.Capability{Available: true},
 	}
-	return providers.RemoteServer{ExternalID: id, Scope: data.HypervisorID.String(), Name: name, State: state, RemoteState: remoteState, Spec: spec, Addresses: encodedAddresses, Capabilities: capabilities}
+	return providers.RemoteServer{ExternalID: id, Scope: "", Name: name, State: state, RemoteState: remoteState, Spec: spec, Addresses: encodedAddresses, Capabilities: capabilities}
 }
 
 func decodeRemoteState(raw json.RawMessage) string {
@@ -349,7 +379,7 @@ func decodeRemoteState(raw json.RawMessage) string {
 }
 
 func mapState(remote string, data serverData) providers.ServerState {
-	if data.BuildFailed {
+	if data.BuildFailed || data.BuildFailedAlt {
 		return providers.StateError
 	}
 	if data.Suspended {
@@ -367,7 +397,13 @@ func mapState(remote string, data serverData) providers.ServerState {
 	case "paused", "suspended":
 		return providers.StateSuspended
 	}
-	if data.CommissionStatus < 3 || !strings.EqualFold(data.State, "complete") {
+	if data.Commissioned != nil && !*data.Commissioned {
+		return providers.StatePending
+	}
+	if data.CommissionStatus > 0 && data.CommissionStatus < 3 {
+		return providers.StatePending
+	}
+	if strings.TrimSpace(data.State) != "" && remote == "unknown" && !strings.EqualFold(data.State, "complete") {
 		return providers.StatePending
 	}
 	return providers.StateUnknown
@@ -455,42 +491,75 @@ func normalizeEndpoint(raw string, allowHTTP bool) (*url.URL, *url.URL, error) {
 	if parsed.Scheme != "https" && !(allowHTTP && parsed.Scheme == "http") {
 		return nil, nil, errors.New("VirtFusion endpoint must use HTTPS")
 	}
-	parsed.Path = strings.TrimSuffix(parsed.Path, "/")
-	if strings.HasSuffix(parsed.Path, "/api/v1") {
-		parsed.Path = strings.TrimSuffix(parsed.Path, "/api/v1")
+	cleanPath := strings.TrimSuffix(parsed.Path, "/")
+	if cleanPath == "/api/v1" {
+		return nil, nil, errors.New("VirtFusion requires a User API endpoint, not /api/v1")
 	}
+	if cleanPath != "" && cleanPath != "/api" {
+		return nil, nil, errors.New("VirtFusion endpoint must be the control-panel origin or end with /api")
+	}
+	parsed.Path = ""
 	portal := *parsed
 	api := *parsed
-	api.Path = path.Join(parsed.Path, "/api/v1")
+	api.Path = "/api"
 	return &portal, &api, nil
 }
 
 func normalizeServerID(raw string) (string, error) {
-	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil || id < 1 {
+	id, err := uuid.Parse(strings.TrimSpace(raw))
+	if err != nil {
 		return "", errors.New("invalid server ID")
 	}
-	return strconv.FormatInt(id, 10), nil
+	return id.String(), nil
 }
 
-func decodeCursor(cursor *providers.Cursor) (int, error) {
-	if cursor == nil {
-		return 1, nil
+func decodeServerList(raw json.RawMessage) ([]serverData, error) {
+	var direct []serverData
+	if err := json.Unmarshal(raw, &direct); err == nil {
+		return direct, nil
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(cursor.Value)
-	if err != nil {
-		return 0, err
+	var wrapped struct {
+		Servers []serverData `json:"servers"`
 	}
-	var value pageCursor
-	if json.Unmarshal(raw, &value) != nil || value.Page < 1 {
-		return 0, errors.New("invalid cursor")
+	if err := json.Unmarshal(raw, &wrapped); err != nil || wrapped.Servers == nil {
+		return nil, errors.New("invalid server list")
 	}
-	return value.Page, nil
+	return wrapped.Servers, nil
 }
 
-func encodeCursor(page int) string {
-	raw, _ := json.Marshal(pageCursor{Page: page})
-	return base64.RawURLEncoding.EncodeToString(raw)
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstScalar(values ...json.RawMessage) string {
+	for _, raw := range values {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			return strings.TrimSpace(value)
+		}
+		var number json.Number
+		if json.Unmarshal(raw, &number) == nil {
+			return number.String()
+		}
+	}
+	return ""
 }
 
 func decodeStrict(raw []byte, target any) error {

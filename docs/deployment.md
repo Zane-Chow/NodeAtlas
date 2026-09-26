@@ -396,7 +396,7 @@ docker compose logs -f --tail=200 app
 
 SQLite 部署需在命令中同时指定两个 Compose 文件。
 
-### 自托管 VirtFusion、Virtualizor 或 SolusVM 2 连接测试失败
+### 自托管 VirtFusion 或 Virtualizor 连接测试失败
 
 如果面板域名解析到私网地址，把实际需要访问的最小网段加入 `PROVIDER_ALLOWED_PRIVATE_CIDRS`。如果 VNC/WSS 目标也位于私网，再配置 `CONSOLE_ALLOWED_PRIVATE_CIDRS`。不要为了省事放行整个企业网络。
 
@@ -415,4 +415,3 @@ SQLite 部署需在命令中同时指定两个 Compose 文件。
 - `/health/live` 和 `/health/ready` 均成功。
 - WebSocket 控制台和 SSE 实时状态已通过反向代理验证。
 - 已创建一次应用级加密备份，并在另一位置验证可下载保存。
-

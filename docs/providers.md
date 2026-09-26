@@ -13,7 +13,9 @@
 
 ## VirtFusion
 
-连接地址填写控制面板根地址，例如 `https://panel.example.com`；也接受以 `/api/v1` 结尾的地址。面板调用 API v1 的 `/connect`、`/servers`、服务器详情、电源操作和 VNC 端点。Token 应只具有读取服务器、执行电源操作和读取 VNC 临时连接信息所需的权限。
+只支持 VirtFusion 6.1 及以上的客户 User API，不使用 Global/Admin API。先以普通客户身份登录服务商面板，在 `Account → API` 创建用户 Token。连接地址可填写控制面板根地址 `https://panel.example.com`，也可填写文档显示的 API 地址 `https://panel.example.com/api`；两者内部都会规范为 `/api`。`/api/v1` 属于管理员 API，会被明确拒绝。VirtFusion 在 [6.1 发布说明](https://docs.virtfusion.com/releases/v6/) 中说明了隔离的 End User API 及其账户内文档入口。
+
+连接测试调用 `GET /api/account`，清单、详情、电源和 VNC 分别使用 `/api/server`、`/api/server/{uuid}` 及其子路径。服务器标识为 UUID；User API 不使用旧 Global API 的数字 ID、复数 `/servers` 或 `page_size` 分页参数。
 
 生产环境只接受 HTTPS。若面板 DNS 或地址位于 RFC1918/ULA 私网，使用逗号分隔的 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行最小必要网段，例如：
 
@@ -64,29 +66,11 @@ Virtualizor 协议要求 `apikey` 与 `apipass` 出现在发往上游的查询�
 
 可用的原始 VNC 连接由后端通过一次性、本地同源 WebSocket 票据代理。上游 IP、端口和临时密码只存在于短期内存会话中；浏览器仅连接本面板的 WebSocket。内嵌与新窗口 noVNC 使用相同机制。VNC 不可用时，两种 VNC 入口都会禁用，但不含凭据的 Virtualizor 管理页仍可打开。私网 VNC 目标同样必须落在 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的允许范围内。
 
-## SolusVM 2
+## SolusVM 2（当前未启用）
 
-仅支持 SolusVM 2 management node 的 REST API v1，不支持 SolusVM 1。连接地址填写 HTTPS 根地址，例如 `https://panel.example.com`，也接受规范的 `/api/v1` 后缀。每个连接独立保存一个 API Token，当前无额外 settings；不要将 Token 放进地址。接口兼容性以 [SolusVM 2 API 文档](https://docs.solusvm.com/en/solusvm2/api-reference/api/) 和目标服务商实际部署版本为准，不假设所有历史版本或定制面板具有相同响应。
+SolusVM 2 官方公开的 REST API v1 使用从管理员界面 `Access → API Tokens` 创建的 management API Token；[官方 Token 配置说明](https://docs.solusvm.com/en/solusvm2/billing-integration-guide/prepaid-billing/installation-and-configuration/initial-configuration/) 未提供与 VirtFusion User API 或 Virtualizor Enduser API 等价的客户 Token。由于本项目现在只允许客户账户侧凭据，运行时不再注册 SolusVM 2，界面也不会提供新建入口。原适配器源码和测试仍保留，待服务商提供有文档的客户 API 后再接入，不能把管理员 Token 当作“用户 Token”填写。
 
-在有权限的 SolusVM 2 管理界面中打开 `Access > API Tokens`，选择生成 Token，为此面板单独命名并妥善保存生成值；关闭复制对话框后无法再次查看。客户账号若没有此入口，应由服务商提供具有相应权限的 Token。参见 [官方 Token 创建说明](https://docs.solusvm.com/en/solusvm2/billing-integration-guide/prepaid-billing/installation-and-configuration/initial-configuration/)。
-
-权限应尽量限制到要管理的服务器。适配器实际只需要读取服务器列表/详情、开机、正常关机、正常重启，以及启用 VNC 的能力，对应以下调用：
-
-- `GET /servers` 与 `GET /servers/{id}`。
-- `POST /servers/{id}/start`、`stop`、`restart`。
-- `POST /servers/{id}/vnc_up`（使用 VNC 时）。
-
-这些是 API 操作路径，不是 Token scope 名称；可选权限粒度取决于服务商版本和账号配置。连接测试只验证列表读取成功，不能证明所有电源和 VNC 权限均已授予。API Token 只用于后端 Bearer 认证，加密入库，保存后不回显。不要将其写入源码、镜像、日志或浏览器存储；轮换后先验证新 Token 可用，再撤销旧 Token。
-
-API 与控制台均要求有效的 TLS 证书，不支持跳过证书校验。保存、DNS 解析、实际拨号均执行地址策略；API 只允许同源 HTTPS 重定向，WSS 连接拒绝重定向。
-
-私网 management node 及 `vnc_up` 返回的私网 compute host 必须通过 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行。中央 console 策略使用 `CONSOLE_ALLOWED_PRIVATE_CIDRS` 与 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的并集，因此 provider 放行已同时允许同一网段的 WSS/HTTPS 控制台目标，无需在两处重复配置。`CONSOLE_ALLOWED_PRIVATE_CIDRS` 用于额外仅供控制台使用的网段，不会授予 provider API 或 compute host 访问权限。provider 放行也会扩大中央 console 的允许范围，两项配置都应限定为最小必要网段。
-
-关机和重启显式发送 `{"force":false}`，不请求强制断电或强制复位；来宾系统仍须能够响应服务商的正常关机机制。操作完成由后续状态查询确认。挂起服务器不提供电源或 VNC 操作。
-
-VNC 使用经过验证的 management node origin 上的 WSS `/vnc` 代理，不直接连接 raw VNC。后端校验 `vnc_up` 的 compute host、端口和 VM UUID，检查全部 DNS 结果，并将其中一个允许的 IP 固定在上游代理目标中，避免 management node 再次解析该主机名。多地址时选择排序后的第一个允许 IP，目前不自动故障转移。实现不依赖 `vnc_proxy_url`，不会使用该字段替换已配置的 WSS origin。
-
-浏览器只获得本面板的一次性票据和 noVNC 当前会话所需的密码，不会获得上游地址、端口或 API Token。VNC 密码只在短期服务端目标和当前浏览器会话内存中使用，不写入数据库、审计、日志、URL 或浏览器存储；本面板的会话到期不表示服务商已撤销或轮换该密码。生命周期及代理要求见 [console.md](console.md)。内嵌和新窗口共用此代理；VNC 被禁用或服务器挂起时两个入口禁用，服务商后台仍可打开。后台回退只打开连接的 HTTPS origin 根页面，不假设管理员/客户区共享深链路，也不附加 Token 或服务器查询参数。
+已有数据库中的 `solusvm2` 连接不会被自动删除，但升级后不能同步或执行操作。请先确认不再依赖这些连接；若未来使用服务商自建的客户 API，应通过 [Provider SDK](provider-sdk.md) 实现独立适配器，而不是复用官方 management API Token。
 
 ## 第三方 PVE 自研面板
 

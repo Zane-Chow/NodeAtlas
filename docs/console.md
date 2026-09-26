@@ -19,7 +19,9 @@ WSS 在创建票据和实际连接时都会执行目标校验，拨号时重新�
 
 无论上游使用 `wss` 还是内部 `vnc+tcp`，浏览器都只连接同源 `/ws/console/` 一次性票据，不会看到上游 IP、端口或供应商凭据。原始 VNC 的 TCP 字节与 WebSocket 二进制帧在网关中直接转发，不写入 React 状态、数据库、审计或应用日志。
 
-## SolusVM 2 VNC
+## SolusVM 2 VNC（保留实现，运行时未启用）
+
+以下内容记录保留适配器的安全边界。由于官方接口使用 management API Token，不符合当前“仅客户账户凭据”策略，该适配器不会在生产运行时注册，也不会出现在新增服务商界面。
 
 SolusVM 2 使用配置的 management node origin 上的 WSS `/vnc` 代理，内嵌和新窗口均复用本地 noVNC 与一次性票据。后端从 `vnc_up` 响应中严格校验 compute host、端口、VM 身份和密码；compute host 的所有 DNS 结果均须通过 provider 网络策略，再选定允许的字面 IP 构造上游目标，避免管理节点二次解析主机名。多地址选择排序后的第一个 IP，不自动切换地址。上游 URL 只在服务端内存中存在，API Token 和 VNC 密码都不放入其查询参数。
 

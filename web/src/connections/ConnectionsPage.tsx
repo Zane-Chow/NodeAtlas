@@ -92,14 +92,11 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
   const [sessionToken, setSessionToken] = useState('')
   const [virtFusionEndpoint, setVirtFusionEndpoint] = useState('')
   const [virtFusionToken, setVirtFusionToken] = useState('')
-  const [virtFusionPageSize, setVirtFusionPageSize] = useState('200')
   const [gcpProjectID, setGCPProjectID] = useState('')
   const [gcpServiceAccountJSON, setGCPServiceAccountJSON] = useState('')
   const [virtualizorEndpoint, setVirtualizorEndpoint] = useState('')
   const [virtualizorAPIKey, setVirtualizorAPIKey] = useState('')
   const [virtualizorAPIPassword, setVirtualizorAPIPassword] = useState('')
-  const [solusVM2Endpoint, setSolusVM2Endpoint] = useState('')
-  const [solusVM2APIToken, setSolusVM2APIToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
@@ -121,13 +118,10 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
           settings: { project_id: gcpProjectID }, credentials: { service_account_json: serviceAccount } })
       } else if (providerType === 'virtfusion') {
         await onSubmit({ name, provider_type: 'virtfusion', endpoint: virtFusionEndpoint.trim(), enabled: true,
-          settings: { page_size: Number(virtFusionPageSize) }, credentials: { token: virtFusionToken } })
+          settings: {}, credentials: { token: virtFusionToken } })
       } else if (providerType === 'virtualizor') {
         await onSubmit({ name, provider_type: 'virtualizor', endpoint: virtualizorEndpoint.trim(), enabled: true,
           settings: {}, credentials: { api_key: virtualizorAPIKey, api_password: virtualizorAPIPassword } })
-      } else if (providerType === 'solusvm2') {
-        await onSubmit({ name, provider_type: 'solusvm2', endpoint: solusVM2Endpoint.trim(), enabled: true,
-          settings: {}, credentials: { api_token: solusVM2APIToken } })
       } else {
         await onSubmit({ name, provider_type: 'mock', endpoint: '', enabled: true,
           settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
@@ -144,23 +138,20 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       <label htmlFor="aws-access-key">Access Key ID</label><input id="aws-access-key" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} required autoComplete="off" />
       <label htmlFor="aws-secret-key">Secret Access Key</label><input id="aws-secret-key" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} required autoComplete="new-password" />
       <label htmlFor="aws-session-token">Session Token（可选）</label><input id="aws-session-token" type="password" value={sessionToken} onChange={(event) => setSessionToken(event.target.value)} autoComplete="new-password" />
+      <p className="field-note">使用你自己的 AWS 账户中创建的最小权限 IAM 凭据，不使用平台管理员凭据。</p>
     </> : providerType === 'gcp' ? <>
       <label htmlFor="gcp-project-id">GCP Project ID</label><input id="gcp-project-id" value={gcpProjectID} onChange={(event) => setGCPProjectID(event.target.value)} required />
       <label htmlFor="gcp-service-account">Service Account JSON</label><textarea id="gcp-service-account" value={gcpServiceAccountJSON} onChange={(event) => setGCPServiceAccountJSON(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">使用你自己的 GCP 项目服务账号；GCP 不提供与面板类产品相同形式的单一 API Token。</p>
     </> : providerType === 'virtfusion' ? <>
-      <label htmlFor="virtfusion-endpoint">VirtFusion 面板地址</label><input id="virtfusion-endpoint" type="url" value={virtFusionEndpoint} onChange={(event) => setVirtFusionEndpoint(event.target.value)} placeholder="https://panel.example.com" required />
-      <label htmlFor="virtfusion-page-size">每页服务器数</label><input id="virtfusion-page-size" type="number" min="1" max="200" value={virtFusionPageSize} onChange={(event) => setVirtFusionPageSize(event.target.value)} required />
-      <label htmlFor="virtfusion-token">API Bearer Token</label><input id="virtfusion-token" type="password" value={virtFusionToken} onChange={(event) => setVirtFusionToken(event.target.value)} required autoComplete="new-password" />
-      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
+      <label htmlFor="virtfusion-endpoint">VirtFusion 用户 API 地址</label><input id="virtfusion-endpoint" type="url" value={virtFusionEndpoint} onChange={(event) => setVirtFusionEndpoint(event.target.value)} placeholder="https://panel.example.com/api" required />
+      <label htmlFor="virtfusion-token">用户 API Token</label><input id="virtfusion-token" type="password" value={virtFusionToken} onChange={(event) => setVirtFusionToken(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">请使用客户区 Account → API 创建的 Token；可填写 HTTPS 面板根地址或 /api，不能填写管理员 API 的 /api/v1。</p>
     </> : providerType === 'virtualizor' ? <>
       <label htmlFor="virtualizor-endpoint">Virtualizor 面板地址</label><input id="virtualizor-endpoint" type="url" value={virtualizorEndpoint} onChange={(event) => setVirtualizorEndpoint(event.target.value)} placeholder="https://panel.example.com:4083" required />
-      <label htmlFor="virtualizor-api-key">Virtualizor API Key</label><input id="virtualizor-api-key" type="password" value={virtualizorAPIKey} onChange={(event) => setVirtualizorAPIKey(event.target.value)} required autoComplete="new-password" />
-      <label htmlFor="virtualizor-api-password">Virtualizor API Password</label><input id="virtualizor-api-password" type="password" value={virtualizorAPIPassword} onChange={(event) => setVirtualizorAPIPassword(event.target.value)} required autoComplete="new-password" />
-      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
-    </> : providerType === 'solusvm2' ? <>
-      <label htmlFor="solusvm2-endpoint">SolusVM 2 面板地址</label><input id="solusvm2-endpoint" type="url" value={solusVM2Endpoint} onChange={(event) => setSolusVM2Endpoint(event.target.value)} placeholder="https://panel.example.com" required />
-      <label htmlFor="solusvm2-api-token">SolusVM 2 API Token</label><input id="solusvm2-api-token" type="password" value={solusVM2APIToken} onChange={(event) => setSolusVM2APIToken(event.target.value)} required autoComplete="new-password" />
-      <p className="field-note">面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。</p>
+      <label htmlFor="virtualizor-api-key">Enduser API Key</label><input id="virtualizor-api-key" type="password" value={virtualizorAPIKey} onChange={(event) => setVirtualizorAPIKey(event.target.value)} required autoComplete="new-password" />
+      <label htmlFor="virtualizor-api-password">Enduser API Password</label><input id="virtualizor-api-password" type="password" value={virtualizorAPIPassword} onChange={(event) => setVirtualizorAPIPassword(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">只支持客户区 Enduser API 凭据；面板必须使用 HTTPS，私网地址需由管理员在服务端白名单中放行。</p>
     </> : <>
       <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />
       <label htmlFor="console-profile">控制台能力</label><select id="console-profile" value={consoleProfile} onChange={(event) => setConsoleProfile(event.target.value)}><option value="embedded">内嵌 + 新窗口</option><option value="window">仅新窗口</option><option value="portal">仅服务商后台</option><option value="none">不可用</option></select>

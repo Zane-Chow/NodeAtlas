@@ -73,7 +73,7 @@ it('creates an AWS connection with multiple regions and write-only static creden
   expect(screen.queryByText('write-only-secret')).not.toBeInTheDocument()
 })
 
-it('creates a VirtFusion connection with a write-only bearer token', async () => {
+it('creates a VirtFusion connection with a write-only user API token', async () => {
   let submitted: Record<string, unknown> | undefined
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input)
@@ -81,7 +81,7 @@ it('creates a VirtFusion connection with a write-only bearer token', async () =>
     if (url.endsWith('/connections') && init?.method === 'POST') {
       submitted = JSON.parse(String(init.body))
       return new Response(JSON.stringify({ connection: {
-        id: 'vf-a', name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test', settings: { page_size: 100 },
+        id: 'vf-a', name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test/api', settings: {},
         enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
         created_at: '2026-09-18T12:00:00Z', updated_at: '2026-09-18T12:00:00Z',
       } }), { status: 201 })
@@ -94,15 +94,13 @@ it('creates a VirtFusion connection with a write-only bearer token', async () =>
   await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
   await userEvent.selectOptions(screen.getByLabelText('服务商类型'), 'virtfusion')
   await userEvent.type(screen.getByLabelText('连接名称'), 'VF 欧洲节点')
-  await userEvent.type(screen.getByLabelText('VirtFusion 面板地址'), 'https://vf.example.test')
-  await userEvent.clear(screen.getByLabelText('每页服务器数'))
-  await userEvent.type(screen.getByLabelText('每页服务器数'), '100')
-  await userEvent.type(screen.getByLabelText('API Bearer Token'), 'write-only-vf-token')
+  await userEvent.type(screen.getByLabelText('VirtFusion 用户 API 地址'), 'https://vf.example.test/api')
+  await userEvent.type(screen.getByLabelText('用户 API Token'), 'write-only-vf-token')
   await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
 
   await waitFor(() => expect(submitted).toMatchObject({
-    name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test',
-    settings: { page_size: 100 }, credentials: { token: 'write-only-vf-token' },
+    name: 'VF 欧洲节点', provider_type: 'virtfusion', endpoint: 'https://vf.example.test/api',
+    settings: {}, credentials: { token: 'write-only-vf-token' },
   }))
   expect(screen.queryByText('write-only-vf-token')).not.toBeInTheDocument()
 })
@@ -200,8 +198,8 @@ it('creates a Virtualizor connection with write-only API credentials', async () 
   await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
   await userEvent.type(screen.getByLabelText('连接名称'), 'Virtualizor 主节点')
   await userEvent.type(screen.getByLabelText('Virtualizor 面板地址'), 'https://panel.example.test:4083')
-  await userEvent.type(screen.getByLabelText('Virtualizor API Key'), 'write-only-api-key')
-  await userEvent.type(screen.getByLabelText('Virtualizor API Password'), 'write-only-api-password')
+  await userEvent.type(screen.getByLabelText('Enduser API Key'), 'write-only-api-key')
+  await userEvent.type(screen.getByLabelText('Enduser API Password'), 'write-only-api-password')
   await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
 
   await waitFor(() => expect(submitted).toMatchObject({
@@ -209,47 +207,10 @@ it('creates a Virtualizor connection with write-only API credentials', async () 
     settings: {}, credentials: { api_key: 'write-only-api-key', api_password: 'write-only-api-password' },
   }))
   expect(screen.queryByRole('form', { name: '添加服务商' })).not.toBeInTheDocument()
-  expect(screen.queryByLabelText('Virtualizor API Key')).not.toBeInTheDocument()
-  expect(screen.queryByLabelText('Virtualizor API Password')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Enduser API Key')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Enduser API Password')).not.toBeInTheDocument()
   expect(screen.queryByText('write-only-api-key')).not.toBeInTheDocument()
   expect(screen.queryByText('write-only-api-password')).not.toBeInTheDocument()
-})
-
-it('creates a SolusVM 2 connection with a write-only API token', async () => {
-  let submitted: Record<string, unknown> | undefined
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-    const url = String(input)
-    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'solusvm2', name: 'SolusVM 2' }] }), { status: 200 })
-    if (url.endsWith('/connections') && init?.method === 'POST') {
-      submitted = JSON.parse(String(init.body))
-      return new Response(JSON.stringify({ connection: {
-        id: 'solusvm2-a', name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test', settings: {},
-        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
-        created_at: '2026-09-21T12:00:00Z', updated_at: '2026-09-21T12:00:00Z',
-      } }), { status: 201 })
-    }
-    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
-  })
-
-  render(<ConnectionsPage />)
-  await screen.findByText('还没有服务商连接，请先添加服务商。')
-  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
-  await userEvent.type(screen.getByLabelText('连接名称'), 'SolusVM 2 主节点')
-  await userEvent.type(screen.getByLabelText('SolusVM 2 面板地址'), '  https://panel.example.test  ')
-  const token = screen.getByLabelText('SolusVM 2 API Token')
-  expect(token).toHaveAttribute('type', 'password')
-  expect(token).toHaveAttribute('autocomplete', 'new-password')
-  await userEvent.type(token, 'write-only-solusvm2-token')
-  expect(screen.getByText('面板必须使用 HTTPS；私网地址需由管理员在服务端白名单中放行。')).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
-
-  await waitFor(() => expect(submitted).toEqual({
-    name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test', enabled: true,
-    settings: {}, credentials: { api_token: 'write-only-solusvm2-token' },
-  }))
-  expect(screen.queryByRole('form', { name: '添加服务商' })).not.toBeInTheDocument()
-  expect(screen.queryByLabelText('SolusVM 2 API Token')).not.toBeInTheDocument()
-  expect(screen.queryByText('write-only-solusvm2-token')).not.toBeInTheDocument()
 })
 
 it('tests and synchronizes a connection', async () => {

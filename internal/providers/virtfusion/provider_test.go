@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +15,9 @@ import (
 	"controlpanel/internal/providers"
 )
 
-func TestProviderPaginatesMapsPowersAndOpensVNC(t *testing.T) {
+func TestProviderUsesUserAPIMapsPowersAndOpensVNC(t *testing.T) {
+	const firstID = "11111111-1111-4111-8111-111111111111"
+	const secondID = "22222222-2222-4222-8222-222222222222"
 	var mutex sync.Mutex
 	requests := make([]string, 0)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
@@ -26,25 +27,20 @@ func TestProviderPaginatesMapsPowersAndOpensVNC(t *testing.T) {
 		mutex.Unlock()
 
 		switch request.Method + " " + request.URL.Path {
-		case "GET /api/v1/connect":
-			writeFixtureJSON(t, response, http.StatusOK, []any{})
-		case "GET /api/v1/servers":
-			page, _ := strconv.Atoi(request.URL.Query().Get("page"))
-			require.Equal(t, "simple", request.URL.Query().Get("type"))
-			require.Equal(t, "2", request.URL.Query().Get("results"))
-			if page == 1 {
-				writeFixtureJSON(t, response, http.StatusOK, map[string]any{"current_page": 1, "last_page": 2, "data": []any{map[string]any{"id": 41}}})
-				return
-			}
-			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"current_page": 2, "last_page": 2, "data": []any{map[string]any{"id": 42}}})
-		case "GET /api/v1/servers/41":
-			require.Equal(t, "true", request.URL.Query().Get("remoteState"))
-			writeFixtureJSON(t, response, http.StatusOK, serverDetail(41, "api-node", "running", false))
-		case "GET /api/v1/servers/42":
-			writeFixtureJSON(t, response, http.StatusOK, serverDetail(42, "worker-node", "shutoff", false))
-		case "POST /api/v1/servers/41/power/boot", "POST /api/v1/servers/41/power/shutdown", "POST /api/v1/servers/41/power/restart":
+		case "GET /api/account":
+			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"data": map[string]any{"name": "Test User"}})
+		case "GET /api/server":
+			require.Empty(t, request.URL.RawQuery)
+			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"data": []any{
+				map[string]any{"uuid": firstID}, map[string]any{"uuid": secondID},
+			}})
+		case "GET /api/server/" + firstID:
+			writeFixtureJSON(t, response, http.StatusOK, serverDetail(firstID, "api-node", "running", false))
+		case "GET /api/server/" + secondID:
+			writeFixtureJSON(t, response, http.StatusOK, serverDetail(secondID, "worker-node", "shutoff", false))
+		case "POST /api/server/" + firstID + "/power/boot", "POST /api/server/" + firstID + "/power/shutdown", "POST /api/server/" + firstID + "/power/restart":
 			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"data": map[string]any{"queueId": 171}})
-		case "GET /api/v1/servers/41/vnc":
+		case "GET /api/server/" + firstID + "/vnc":
 			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"data": map[string]any{"vnc": map[string]any{"password": "temporary-vnc-secret", "wss": map[string]any{"url": "/vnc/?token=temporary-token"}}}})
 		default:
 			http.NotFound(response, request)
@@ -54,7 +50,7 @@ func TestProviderPaginatesMapsPowersAndOpensVNC(t *testing.T) {
 
 	factory := newFactory(factoryOptions{allowHTTP: true, allowLoopback: true})
 	provider, err := factory.Create(providers.ConnectionConfig{
-		ID: "vf-one", Type: "virtfusion", Endpoint: server.URL,
+		ID: "vf-one", Type: "virtfusion", Endpoint: server.URL + "/api",
 		Settings: json.RawMessage(`{"page_size":2}`), Credentials: json.RawMessage(`{"token":"vf-secret-token"}`),
 	})
 	require.NoError(t, err)
@@ -63,26 +59,22 @@ func TestProviderPaginatesMapsPowersAndOpensVNC(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "VirtFusion", info.DisplayName)
 
-	first, err := provider.ListServers(context.Background(), nil)
+	listed, err := provider.ListServers(context.Background(), nil)
 	require.NoError(t, err)
-	require.Len(t, first.Servers, 1)
-	require.Equal(t, "41", first.Servers[0].ExternalID)
-	require.Equal(t, "api-node", first.Servers[0].Name)
-	require.Equal(t, providers.StateRunning, first.Servers[0].State)
-	require.True(t, first.Servers[0].Capabilities.CanStop.Available)
-	require.True(t, first.Servers[0].Capabilities.CanEmbedConsole.Available)
-	require.True(t, first.Servers[0].Capabilities.CanOpenConsoleWindow.Available)
-	require.JSONEq(t, `{"memory_mb":1024,"storage_gb":25,"traffic_gb":1000,"cpu":2}`, string(first.Servers[0].Spec))
-	require.JSONEq(t, `[{"type":"ipv4","address":"198.51.100.41"},{"type":"ipv6","address":"2001:db8::41"}]`, string(first.Servers[0].Addresses))
-	require.NotNil(t, first.Next)
+	require.Len(t, listed.Servers, 2)
+	require.Equal(t, firstID, listed.Servers[0].ExternalID)
+	require.Equal(t, "api-node", listed.Servers[0].Name)
+	require.Equal(t, providers.StateRunning, listed.Servers[0].State)
+	require.True(t, listed.Servers[0].Capabilities.CanStop.Available)
+	require.True(t, listed.Servers[0].Capabilities.CanEmbedConsole.Available)
+	require.True(t, listed.Servers[0].Capabilities.CanOpenConsoleWindow.Available)
+	require.JSONEq(t, `{"memory_mb":1024,"storage_gb":25,"traffic_gb":1000,"cpu":2}`, string(listed.Servers[0].Spec))
+	require.JSONEq(t, `[{"type":"ipv4","address":"198.51.100.41"},{"type":"ipv6","address":"2001:db8::41"}]`, string(listed.Servers[0].Addresses))
+	require.Equal(t, providers.StateStopped, listed.Servers[1].State)
+	require.True(t, listed.Servers[1].Capabilities.CanStart.Available)
+	require.Nil(t, listed.Next)
 
-	second, err := provider.ListServers(context.Background(), first.Next)
-	require.NoError(t, err)
-	require.Equal(t, providers.StateStopped, second.Servers[0].State)
-	require.True(t, second.Servers[0].Capabilities.CanStart.Available)
-	require.Nil(t, second.Next)
-
-	ref := providers.ServerRef{ExternalID: "41"}
+	ref := providers.ServerRef{ExternalID: firstID}
 	_, err = provider.StartServer(context.Background(), ref)
 	require.NoError(t, err)
 	_, err = provider.StopServer(context.Background(), ref)
@@ -100,12 +92,21 @@ func TestProviderPaginatesMapsPowersAndOpensVNC(t *testing.T) {
 	require.Equal(t, "temporary-token", target.URL.Query().Get("token"))
 	portal, err := provider.ProviderPortalURL(context.Background(), ref)
 	require.NoError(t, err)
-	require.Equal(t, server.URL, portal.String())
+	require.Equal(t, server.URL+"/server/"+firstID, portal.String())
 
 	mutex.Lock()
 	joined := strings.Join(requests, "\n")
 	mutex.Unlock()
-	require.Contains(t, joined, "POST /api/v1/servers/41/power/shutdown")
+	require.Contains(t, joined, "POST /api/server/"+firstID+"/power/shutdown")
+}
+
+func TestFactoryRejectsGlobalAdminAPIEndpoint(t *testing.T) {
+	factory := newFactory(factoryOptions{allowHTTP: true, allowLoopback: true})
+	_, err := factory.Create(providers.ConnectionConfig{
+		ID: "vf", Type: "virtfusion", Endpoint: "http://127.0.0.1:8080/api/v1",
+		Settings: json.RawMessage(`{}`), Credentials: json.RawMessage(`{"token":"test"}`),
+	})
+	require.EqualError(t, err, "VirtFusion requires a User API endpoint, not /api/v1")
 }
 
 func TestFactoryRejectsUnsafeEndpointsAndDoesNotEchoToken(t *testing.T) {
@@ -170,18 +171,17 @@ func TestProviderRejectsCrossOriginVNCURL(t *testing.T) {
 	factory := newFactory(factoryOptions{allowHTTP: true, allowLoopback: true})
 	provider, err := factory.Create(providers.ConnectionConfig{ID: "vf", Endpoint: server.URL, Settings: json.RawMessage(`{}`), Credentials: json.RawMessage(`{"token":"test"}`)})
 	require.NoError(t, err)
-	_, err = provider.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "1"}, providers.ConsoleEmbedded)
+	_, err = provider.OpenConsole(context.Background(), providers.ServerRef{ExternalID: "11111111-1111-4111-8111-111111111111"}, providers.ConsoleEmbedded)
 	require.Error(t, err)
 }
 
-func serverDetail(id int, name, remoteState string, suspended bool) map[string]any {
+func serverDetail(id, name, remoteState string, suspended bool) map[string]any {
 	return map[string]any{"data": map[string]any{
-		"id": id, "name": name, "state": "complete", "commissionStatus": 3, "suspended": suspended, "buildFailed": false, "remoteState": remoteState,
-		"settings": map[string]any{"resources": map[string]any{"memory": 1024, "storage": 25, "traffic": 1000, "cpuCores": 2}},
-		"vnc":      map[string]any{"enabled": true},
+		"uuid": id, "name": name, "state": remoteState, "commissioned": true, "suspended": suspended, "build_failed": false,
+		"resources": map[string]any{"memory": 1024, "storage": 25, "traffic": 1000, "cpu_cores": 2},
 		"network": map[string]any{"interfaces": []any{map[string]any{
-			"ipv4": []any{map[string]any{"address": "198.51.100." + strconv.Itoa(id)}},
-			"ipv6": []any{map[string]any{"address": "2001:db8::" + strconv.Itoa(id)}},
+			"ipv4": []any{map[string]any{"address": "198.51.100.41"}},
+			"ipv6": []any{map[string]any{"address": "2001:db8::41"}},
 		}}},
 	}}
 }
