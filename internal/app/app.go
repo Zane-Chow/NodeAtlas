@@ -27,6 +27,7 @@ import (
 	provideraws "controlpanel/internal/providers/aws"
 	providergcp "controlpanel/internal/providers/gcp"
 	providermock "controlpanel/internal/providers/mock"
+	providersolusvm2 "controlpanel/internal/providers/solusvm2"
 	providervirtfusion "controlpanel/internal/providers/virtfusion"
 	providervirtualizor "controlpanel/internal/providers/virtualizor"
 	"controlpanel/internal/secrets"
@@ -109,6 +110,11 @@ func compose(db *sql.DB, dialect database.Dialect, cfg config.Config) (http.Hand
 		return nil, nil, err
 	}
 	if err := registry.Register("gcp", providergcp.NewFactory()); err != nil {
+		return nil, nil, err
+	}
+	if err := registry.Register("solusvm2", providersolusvm2.NewFactory(
+		providersolusvm2.FactoryOptions{AllowedPrivateCIDRs: allowedProviderCIDRs},
+	)); err != nil {
 		return nil, nil, err
 	}
 	if err := registry.Register("virtualizor", providervirtualizor.NewFactory(

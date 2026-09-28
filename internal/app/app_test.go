@@ -63,6 +63,7 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 			{"id":"aws","name":"AWS EC2"},
 			{"id":"gcp","name":"Google Cloud Compute Engine"},
 			{"id":"mock","name":"Mock Provider"},
+			{"id":"solusvm2","name":"SolusVM 2"},
 			{"id":"virtualizor","name":"Virtualizor"},
 			{"id":"virtfusion","name":"VirtFusion"}
 		]
@@ -100,7 +101,7 @@ func TestComposeCreatesAuthenticatedProviderConnection(t *testing.T) {
 	require.Equal(t, "Lab A", stored[0].Name)
 }
 
-func TestComposeRejectsSolusVM2AdminTokens(t *testing.T) {
+func TestComposeAcceptsSolusVM2APITokens(t *testing.T) {
 	temporary := t.TempDir()
 	cfg := config.Config{
 		Environment: "development",
@@ -108,6 +109,7 @@ func TestComposeRejectsSolusVM2AdminTokens(t *testing.T) {
 		Database:    config.DatabaseConfig{URL: "sqlite://" + filepath.Join(temporary, "solusvm2-app.db")},
 		Secrets:     config.SecretConfig{CredentialKeys: map[int][]byte{1: bytes.Repeat([]byte{11}, 32)}, ActiveKeyVersion: 1},
 		Backup:      config.BackupConfig{Directory: filepath.Join(temporary, "backups")},
+		Providers:   config.ProviderConfig{AllowedPrivateCIDRs: []string{"10.20.0.0/24"}},
 	}
 	db, dialect, err := database.Open(context.Background(), cfg.Database)
 	require.NoError(t, err)
@@ -123,10 +125,10 @@ func TestComposeRejectsSolusVM2AdminTokens(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, appRequest(http.MethodPost, "/api/v1/connections", `{
-		"name":"Solus","provider_type":"solusvm2","endpoint":"https://panel.example.test",
+		"name":"Solus","provider_type":"solusvm2","endpoint":"https://10.20.0.10",
 		"enabled":false,"settings":{},"credentials":{"api_token":"admin-token"}
 	}`, cookies))
-	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
 	require.NotContains(t, response.Body.String(), "admin-token")
 }
 

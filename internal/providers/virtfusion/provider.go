@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,12 +61,46 @@ type detailResponse struct {
 	Data serverData `json:"data"`
 }
 
+type flexibleInt int
+
+func (value *flexibleInt) UnmarshalJSON(raw []byte) error {
+	if string(raw) == "null" {
+		return nil
+	}
+	var number json.Number
+	if json.Unmarshal(raw, &number) == nil {
+		parsed, err := strconv.Atoi(number.String())
+		if err != nil {
+			return errors.New("invalid integer")
+		}
+		*value = flexibleInt(parsed)
+		return nil
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		parsed, err := strconv.Atoi(strings.TrimSpace(text))
+		if err != nil {
+			return errors.New("invalid integer")
+		}
+		*value = flexibleInt(parsed)
+		return nil
+	}
+	var boolean bool
+	if json.Unmarshal(raw, &boolean) == nil {
+		if boolean {
+			*value = 3
+		}
+		return nil
+	}
+	return errors.New("invalid integer")
+}
+
 type serverData struct {
 	UUID             string          `json:"uuid"`
 	Name             string          `json:"name"`
 	Hostname         string          `json:"hostname"`
 	State            string          `json:"state"`
-	Commissioned     *bool           `json:"commissioned"`
+	Commissioned     *flexibleInt    `json:"commissioned"`
 	CommissionStatus int             `json:"commissionStatus"`
 	Suspended        bool            `json:"suspended"`
 	Locked           bool            `json:"locked"`
@@ -354,7 +389,7 @@ func normalizeServer(data serverData) providers.RemoteServer {
 	}
 	encodedAddresses, _ := json.Marshal(addresses)
 	buildFailed := data.BuildFailed || data.BuildFailedAlt
-	commissioned := data.Commissioned == nil || *data.Commissioned
+	commissioned := data.Commissioned == nil || int(*data.Commissioned) >= 3
 	vncAvailable := commissioned && !data.Suspended && !data.Locked && !buildFailed
 	capabilities := providers.Capabilities{
 		CanStart:             capability(state == providers.StateStopped, "server must be stopped"),
@@ -397,7 +432,7 @@ func mapState(remote string, data serverData) providers.ServerState {
 	case "paused", "suspended":
 		return providers.StateSuspended
 	}
-	if data.Commissioned != nil && !*data.Commissioned {
+	if data.Commissioned != nil && int(*data.Commissioned) < 3 {
 		return providers.StatePending
 	}
 	if data.CommissionStatus > 0 && data.CommissionStatus < 3 {

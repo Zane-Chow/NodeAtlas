@@ -66,11 +66,11 @@ Virtualizor 协议要求 `apikey` 与 `apipass` 出现在发往上游的查询�
 
 可用的原始 VNC 连接由后端通过一次性、本地同源 WebSocket 票据代理。上游 IP、端口和临时密码只存在于短期内存会话中；浏览器仅连接本面板的 WebSocket。内嵌与新窗口 noVNC 使用相同机制。VNC 不可用时，两种 VNC 入口都会禁用，但不含凭据的 Virtualizor 管理页仍可打开。私网 VNC 目标同样必须落在 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 的允许范围内。
 
-## SolusVM 2（当前未启用）
+## SolusVM 2
 
-SolusVM 2 官方公开的 REST API v1 使用从管理员界面 `Access → API Tokens` 创建的 management API Token；[官方 Token 配置说明](https://docs.solusvm.com/en/solusvm2/billing-integration-guide/prepaid-billing/installation-and-configuration/initial-configuration/) 未提供与 VirtFusion User API 或 Virtualizor Enduser API 等价的客户 Token。由于本项目现在只允许客户账户侧凭据，运行时不再注册 SolusVM 2，界面也不会提供新建入口。原适配器源码和测试仍保留，待服务商提供有文档的客户 API 后再接入，不能把管理员 Token 当作“用户 Token”填写。
+SolusVM 2 已在运行时和新增服务商界面启用。连接地址填写 HTTPS management node 根地址，Token 使用服务商提供的 SolusVM 2 API Token。官方标准 Token 可从管理员界面 `Access → API Tokens` 创建，参见[官方 Token 配置说明](https://docs.solusvm.com/en/solusvm2/billing-integration-guide/prepaid-billing/installation-and-configuration/initial-configuration/)；如果你是服务商客户，应向服务商确认 Token 的来源、资源范围和权限。
 
-已有数据库中的 `solusvm2` 连接不会被自动删除，但升级后不能同步或执行操作。请先确认不再依赖这些连接；若未来使用服务商自建的客户 API，应通过 [Provider SDK](provider-sdk.md) 实现独立适配器，而不是复用官方 management API Token。
+适配器只调用服务器列表与详情、开机、正常关机、正常重启和 VNC 相关端点。应使用专用、最小权限 Token；凭据只在后端 Bearer 认证中使用、加密入库且不会回显。API 与控制台均要求有效 TLS，私网 management node 或 compute host 必须通过 `PROVIDER_ALLOWED_PRIVATE_CIDRS` 放行最小必要网段。
 
 ## 第三方 PVE 自研面板
 

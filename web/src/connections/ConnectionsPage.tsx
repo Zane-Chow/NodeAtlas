@@ -27,6 +27,13 @@ export function ConnectionsPage() {
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void listConnections().then(setConnections).catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   async function handleCreate(input: Parameters<typeof createConnection>[0]) {
     const created = await createConnection(input)
     setConnections((current) => [...current, created])
@@ -40,7 +47,8 @@ export function ConnectionsPage() {
       const result = await testConnection(connection.id)
       setNotice(result.healthy ? '连接测试成功' : `连接测试失败：${result.message}`)
       setConnections((current) => current.map((item) => item.id === connection.id
-        ? { ...item, health_status: result.healthy ? 'healthy' : 'degraded' }
+        ? { ...item, health_status: result.healthy ? 'healthy' : 'degraded',
+            ...(result.healthy ? { last_error_code: undefined, last_error_message: undefined } : {}) }
         : item))
     } catch { setNotice('连接测试失败') }
   }
@@ -70,6 +78,7 @@ export function ConnectionsPage() {
       {connections.map((connection) => <article className="connection-card" key={connection.id}>
         <div className="card-title"><div><span className="provider-badge">{connection.provider_type}</span><h3>{connection.name}</h3></div><span className={`health-chip ${connection.health_status}`}>{healthLabels[connection.health_status]}</span></div>
         <dl><div><dt>状态</dt><dd>{connection.enabled ? '已启用' : '已停用'}</dd></div><div><dt>上次同步</dt><dd>{connection.last_synced_at ? new Date(connection.last_synced_at).toLocaleString() : '尚未同步'}</dd></div></dl>
+        {connection.last_error_message && <p className="form-error" role="alert">同步失败：{connection.last_error_message}{connection.last_error_code ? `（${connection.last_error_code}）` : ''}</p>}
         <div className="card-actions"><button aria-label={`测试 ${connection.name}`} onClick={() => void handleTest(connection)}>测试连接</button><button aria-label={`同步 ${connection.name}`} disabled={!connection.enabled} onClick={() => void handleSync(connection)}>立即同步</button><button className="danger-button" aria-label={`删除 ${connection.name}`} onClick={() => void handleDelete(connection)}>删除</button></div>
       </article>)}
     </div>}
@@ -97,6 +106,8 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
   const [virtualizorEndpoint, setVirtualizorEndpoint] = useState('')
   const [virtualizorAPIKey, setVirtualizorAPIKey] = useState('')
   const [virtualizorAPIPassword, setVirtualizorAPIPassword] = useState('')
+  const [solusVM2Endpoint, setSolusVM2Endpoint] = useState('')
+  const [solusVM2APIToken, setSolusVM2APIToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
@@ -122,6 +133,9 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       } else if (providerType === 'virtualizor') {
         await onSubmit({ name, provider_type: 'virtualizor', endpoint: virtualizorEndpoint.trim(), enabled: true,
           settings: {}, credentials: { api_key: virtualizorAPIKey, api_password: virtualizorAPIPassword } })
+      } else if (providerType === 'solusvm2') {
+        await onSubmit({ name, provider_type: 'solusvm2', endpoint: solusVM2Endpoint.trim(), enabled: true,
+          settings: {}, credentials: { api_token: solusVM2APIToken } })
       } else {
         await onSubmit({ name, provider_type: 'mock', endpoint: '', enabled: true,
           settings: { server_count: Number(serverCount), console_profile: consoleProfile }, credentials: { token } })
@@ -152,6 +166,10 @@ function ConnectionForm({ providerTypes, onCancel, onSubmit }: {
       <label htmlFor="virtualizor-api-key">Enduser API Key</label><input id="virtualizor-api-key" type="password" value={virtualizorAPIKey} onChange={(event) => setVirtualizorAPIKey(event.target.value)} required autoComplete="new-password" />
       <label htmlFor="virtualizor-api-password">Enduser API Password</label><input id="virtualizor-api-password" type="password" value={virtualizorAPIPassword} onChange={(event) => setVirtualizorAPIPassword(event.target.value)} required autoComplete="new-password" />
       <p className="field-note">只支持客户区 Enduser API 凭据；面板必须使用 HTTPS，私网地址需由管理员在服务端白名单中放行。</p>
+    </> : providerType === 'solusvm2' ? <>
+      <label htmlFor="solusvm2-endpoint">SolusVM 2 面板地址</label><input id="solusvm2-endpoint" type="url" value={solusVM2Endpoint} onChange={(event) => setSolusVM2Endpoint(event.target.value)} placeholder="https://panel.example.com" required />
+      <label htmlFor="solusvm2-api-token">SolusVM 2 API Token</label><input id="solusvm2-api-token" type="password" value={solusVM2APIToken} onChange={(event) => setSolusVM2APIToken(event.target.value)} required autoComplete="new-password" />
+      <p className="field-note">使用服务商提供的 SolusVM 2 API Token；面板必须使用 HTTPS，私网地址需由管理员在服务端白名单中放行。</p>
     </> : <>
       <label htmlFor="server-count">服务器数量</label><input id="server-count" type="number" min="1" max="500" value={serverCount} onChange={(event) => setServerCount(event.target.value)} required />
       <label htmlFor="console-profile">控制台能力</label><select id="console-profile" value={consoleProfile} onChange={(event) => setConsoleProfile(event.target.value)}><option value="embedded">内嵌 + 新窗口</option><option value="window">仅新窗口</option><option value="portal">仅服务商后台</option><option value="none">不可用</option></select>

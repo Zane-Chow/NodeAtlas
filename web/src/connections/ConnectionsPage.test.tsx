@@ -213,6 +213,52 @@ it('creates a Virtualizor connection with write-only API credentials', async () 
   expect(screen.queryByText('write-only-api-password')).not.toBeInTheDocument()
 })
 
+it('creates a SolusVM 2 connection with a write-only API token', async () => {
+  let submitted: Record<string, unknown> | undefined
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'solusvm2', name: 'SolusVM 2' }] }), { status: 200 })
+    if (url.endsWith('/connections') && init?.method === 'POST') {
+      submitted = JSON.parse(String(init.body))
+      return new Response(JSON.stringify({ connection: {
+        id: 'solusvm2-a', name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test', settings: {},
+        enabled: true, health_status: 'unknown', last_tested_at: null, last_synced_at: null,
+        created_at: '2026-09-21T12:00:00Z', updated_at: '2026-09-21T12:00:00Z',
+      } }), { status: 201 })
+    }
+    return new Response(JSON.stringify({ connections: [] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  await screen.findByText('还没有服务商连接，请先添加服务商。')
+  await userEvent.click(screen.getByRole('button', { name: '添加服务商' }))
+  await userEvent.type(screen.getByLabelText('连接名称'), 'SolusVM 2 主节点')
+  await userEvent.type(screen.getByLabelText('SolusVM 2 面板地址'), 'https://panel.example.test')
+  await userEvent.type(screen.getByLabelText('SolusVM 2 API Token'), 'write-only-solusvm2-token')
+  await userEvent.click(screen.getByRole('button', { name: '保存并同步' }))
+
+  await waitFor(() => expect(submitted).toMatchObject({
+    name: 'SolusVM 2 主节点', provider_type: 'solusvm2', endpoint: 'https://panel.example.test',
+    settings: {}, credentials: { api_token: 'write-only-solusvm2-token' },
+  }))
+  expect(screen.queryByText('write-only-solusvm2-token')).not.toBeInTheDocument()
+})
+
+it('shows a sanitized synchronization failure on the provider card', async () => {
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    if (String(input).endsWith('/provider-types')) return new Response(JSON.stringify({ provider_types: [{ id: 'virtfusion', name: 'VirtFusion' }] }), { status: 200 })
+    return new Response(JSON.stringify({ connections: [{
+      id: 'vf-a', name: 'VF', provider_type: 'virtfusion', endpoint: 'https://vf.example.test/api', settings: {}, enabled: true,
+      health_status: 'offline', last_tested_at: null, last_synced_at: null,
+      last_error_code: 'provider_error', last_error_message: 'VirtFusion returned invalid server inventory',
+      created_at: '2026-09-18T10:00:00Z', updated_at: '2026-09-18T10:01:00Z',
+    }] }), { status: 200 })
+  })
+
+  render(<ConnectionsPage />)
+  expect(await screen.findByRole('alert')).toHaveTextContent('同步失败：VirtFusion returned invalid server inventory（provider_error）')
+})
+
 it('tests and synchronizes a connection', async () => {
   const calls: string[] = []
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

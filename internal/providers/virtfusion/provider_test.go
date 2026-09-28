@@ -32,7 +32,7 @@ func TestProviderUsesUserAPIMapsPowersAndOpensVNC(t *testing.T) {
 		case "GET /api/server":
 			require.Empty(t, request.URL.RawQuery)
 			writeFixtureJSON(t, response, http.StatusOK, map[string]any{"data": []any{
-				map[string]any{"uuid": firstID}, map[string]any{"uuid": secondID},
+				map[string]any{"uuid": firstID, "commissioned": 3}, map[string]any{"uuid": secondID, "commissioned": "3"},
 			}})
 		case "GET /api/server/" + firstID:
 			writeFixtureJSON(t, response, http.StatusOK, serverDetail(firstID, "api-node", "running", false))
@@ -177,7 +177,7 @@ func TestProviderRejectsCrossOriginVNCURL(t *testing.T) {
 
 func serverDetail(id, name, remoteState string, suspended bool) map[string]any {
 	return map[string]any{"data": map[string]any{
-		"uuid": id, "name": name, "state": remoteState, "commissioned": true, "suspended": suspended, "build_failed": false,
+		"uuid": id, "name": name, "state": remoteState, "commissioned": 3, "suspended": suspended, "build_failed": false,
 		"resources": map[string]any{"memory": 1024, "storage": 25, "traffic": 1000, "cpu_cores": 2},
 		"network": map[string]any{"interfaces": []any{map[string]any{
 			"ipv4": []any{map[string]any{"address": "198.51.100.41"}},
